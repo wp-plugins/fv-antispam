@@ -1,7 +1,7 @@
 === FV Antispam ===
 Contributors: FolioVision
 Tags: antispam, spam, comments, akismet, trackback, pings, protect
-Requires at least: 2.7
+Requires at least: 2.9
 Tested up to: 3.0.1
 Stable tag: trunk
 
