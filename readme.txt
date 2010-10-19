@@ -29,6 +29,10 @@ Based on Antispam Bee version 1.5.
 
 == Changelog ==
 
+= 1.8.1 = 
+
+Bugfix for some templates.
+
 = 1.8 = 
 
 First public release
