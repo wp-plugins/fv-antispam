@@ -5,25 +5,33 @@ Requires at least: 2.9
 Tested up to: 3.0.1
 Stable tag: trunk
 
-Powerful and simple antispam plugin. Puts all the spambot comments directly into trash and let's other plugins (Akismet) deal with the rest.
+FV Antispam is a powerful and simple antispam plugin. It moves any spambot comments directly to trash and allows Akismet to just deal with human spam.
 
 == Description ==
-Based on Antispam Bee version 1.5.
+FV Antispam is a powerful and simple antispam plugin. FV Antispam moves any spambot (machine written) comments directly to the trash and allows Akismet to just deal with human spam.
+What makes FV Antispam better than any other solution is the very low CPU load. FV Antispam will not burden your hosting or slow down your server. Other effective antispam plugins may get your hosting cancelled. Really. It happened to us, that's why we wrote FV Antispam.
 
-= Why use our version? =
+= The Problem =
 
-* More simple
-* Doesn't need configuration - all the redundant and dangerous options are removed in favour of not doing mistakes in configuration
-* Reliable
-* No false positives
+Our studies on our own sites have shown that for every 50 human spam comments a popular weblog will have up to 10,000 machine generated spam. With FV Antispam, Akismet finally becomes a usefull tool again allowing you to browse your spam folder and pull out any Akismet false positives. If you use just Akismet, bots fill your whole spam folder with thousands of comments. It's nearly an impossible task to browse through hundreds or thousands of comments to find one or two false positives.
+
+= Why choose FV AntiSpam? =
+
+* Dead simple. Just install, turn on and go. FV Antispam doesn't need configuration. No redundant and dangerous options or cryptic choices.
+* Effective.
+* Reliable.
+* Zero false positives.
+* Virtually no CPU server load.
+
+= How does FV AntiSpam work so well? =
+
 * No detectable signature for spam bots
 * Blacklisted comments are put into trash
 * The spam is moved directly to trash
-* Works hand in hand with Akismet
-* Stops only the machine spam 
-* Doesn't stop human spam which Akismet will move to spam folder
-
-> Our ratios have shown that for every 50 human spam comments a popular weblog will have up to 10 000 machine generated spam. With FV Antispam Akismet becomes a usefull tool again allowing you to browse your spam folder and pull out any Akismet false positives. If you use just Akismet, it fills your whole spam folder with all the spambot commments and you can't really browse through hundreds of spam comments every day to look for false positives.
+* Works hand in hand with Akismet, not trying to replace the collective system but supplement it.
+* Stops only the machine spam
+* Doesn't stop human spam which Akismet will move to spam folder.
+* Keeps the spam folder almost empty so you can quickly go through the spam folder to rescue any Akismet false positives. This is impossible without FV Antispam as the spam folder of any popular site would have thousands of bot posted spam every week or even every day.
 
 [Support and more information](http://foliovision.com/seo-tools/wordpress/plugins/fv-antispam)
 
