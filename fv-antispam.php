@@ -4,7 +4,7 @@ Plugin Name: FV Antispam
 Plugin URI: http://foliovision.com/seo-tools/wordpress/plugins/fv-antispam
 Description: Powerful and simple antispam plugin. Puts all the spambot comments directly into trash and let's other plugins (Akismet) deal with the rest.
 Author: Foliovision
-Version: 1.8.1
+Version: 1.8.2
 Author URI: http://www.foliovision.com
 */
 
@@ -335,16 +335,25 @@ class FV_Antispam {
   }
   
   function verify_comment_request($comment) { ///  detect spam here
+
     $request_url = @$_SERVER['REQUEST_URI'];
     $request_ip = @$_SERVER['REMOTE_ADDR'];
     if (empty($request_url) || empty($request_ip)) {
       return $this->flag_comment_request($comment);
     }
     $comment_type = @$comment['comment_type'];
+    
     $comment_url = @$comment['comment_author_url'];
     $comment_body = @$comment['comment_content'];
     $comment_email = @$comment['comment_author_email'];
     $ping_types = array('pingback', 'trackback', 'pings');
+    /// Global WP setting for closing ping overrides individual post setting in old WP
+    if ($this->is_min_wp('2.7')) {
+    }
+    else if( in_array($comment_type, $ping_types) && get_option( 'default_ping_status' ) == 'closed' ) {
+      die( '<response><error>1</error><message>Sorry, trackbacks are closed for this item.</message></response>' );
+    }
+    ///
     $ping_allowed = !$this->get_plugin_option('ignore_pings');
     if (!empty($comment_url)) {
       $comment_parse = @parse_url($comment_url);
@@ -468,7 +477,9 @@ class FV_Antispam {
     //'always_allowed'=> (isset($_POST['antispam_bee_always_allowed']) ? (int)$_POST['antispam_bee_always_allowed'] : 0),
     ///
     'my_own_styling'=> (isset($_POST['my_own_styling']) ? (int)$_POST['my_own_styling'] : 0),
-    'trash_banned'=> (isset($_POST['trash_banned']) ? (int)$_POST['trash_banned'] : 0)
+    'trash_banned'=> (isset($_POST['trash_banned']) ? (int)$_POST['trash_banned'] : 0),
+    'disable_pingback_notify'=> (isset($_POST['disable_pingback_notify']) ? (int)$_POST['disable_pingback_notify'] : 0),
+    'pingback_notify_email'=> $_POST['pingback_notify_email']
     ///
   );
   if (empty($options['cronjob_interval'])) {
@@ -604,6 +615,35 @@ class FV_Antispam {
             </label>
           </td>
         </tr>
+        <tr>
+          <td>
+            <div class="postbox">
+              <h3>Pingback/trackback notification tweaks</h3>
+              <div class="inside">
+                <table class="form-table">
+                  <tr>
+                    <td>
+                    Enter alternative email address for pingback and trackback notifications<br />
+                      <label for="pingback_notify_email">
+                      <input type="text" class="regular-text" name="pingback_notify_email" id="pingback_notify_email" value="<?php if( function_exists( 'esc_attr' ) ) echo esc_attr( $this->get_plugin_option('pingback_notify_email') ); else echo ( $this->get_plugin_option('pingback_notify_email') ); ?>" />
+                      <span class="description"><?php _e('Leave empty if you want to use the default address from General Settings', 'antispam_bee') ?> <?php $this->show_help_link('disable_pingback_notify') ?></span>
+                      </label>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>
+                    Or<br />
+                      <label for="disable_pingback_notify">
+                      <input type="checkbox" name="disable_pingback_notify" id="disable_pingback_notify" value="1" <?php checked($this->get_plugin_option('disable_pingback_notify'), 1) ?> />
+                      <?php _e('Disable notifications for pingbacks and trackbacks', 'antispam_bee') ?> <?php $this->show_help_link('disable_pingback_notify') ?>
+                      </label>
+                    </td>
+                  </tr>           
+                </table>
+              </div>
+            </div>
+          </td>
+        </tr>
       </table>
       <p>
       <input type="submit" name="antispam_bee_submit" class="button-primary" value="<?php _e('Save Changes') ?>" />
@@ -616,4 +656,146 @@ class FV_Antispam {
   <?php }
 }
 $GLOBALS['FV_Antispam'] = new FV_Antispam();
+
+
+if ( !function_exists('wp_notify_moderator') && ( $GLOBALS['FV_Antispam']->get_plugin_option('disable_pingback_notify') || $GLOBALS['FV_Antispam']->get_plugin_option('pingback_notify_email') ) ) :
+/**
+ * wp_notify_moderator function modified to skip notifications for trackback and pingback type comments
+ *
+ * @param int $comment_id Comment ID
+ * @return bool Always returns true
+ */
+ 
+  if( $GLOBALS['FV_Antispam']->is_min_wp('2.5') ) : 
+   
+  function wp_notify_moderator($comment_id) {
+  	global $wpdb;
+  
+  	if( get_option( "moderation_notify" ) == 0 )
+  		return true;
+  
+  	$comment = $wpdb->get_row($wpdb->prepare("SELECT * FROM $wpdb->comments WHERE comment_ID=%d LIMIT 1", $comment_id));
+  	$post = $wpdb->get_row($wpdb->prepare("SELECT * FROM $wpdb->posts WHERE ID=%d LIMIT 1", $comment->comment_post_ID));
+  
+  	$comment_author_domain = @gethostbyaddr($comment->comment_author_IP);
+  	$comments_waiting = $wpdb->get_var("SELECT count(comment_ID) FROM $wpdb->comments WHERE comment_approved = '0'");
+  
+  	// The blogname option is escaped with esc_html on the way into the database in sanitize_option
+  	// we want to reverse this for the plain text arena of emails.
+  	$blogname = wp_specialchars_decode(get_option('blogname'), ENT_QUOTES);
+  
+  	switch ($comment->comment_type)
+  	{
+  		case 'trackback':
+  		  if( $GLOBALS['FV_Antispam']->get_plugin_option('disable_pingback_notify') ) {
+  		    return true;
+  		  }
+  			$notify_message  = sprintf( __('A new trackback on the post "%s" is waiting for your approval'), $post->post_title ) . "\r\n";
+  			$notify_message .= get_permalink($comment->comment_post_ID) . "\r\n\r\n";
+  			$notify_message .= sprintf( __('Website : %1$s (IP: %2$s , %3$s)'), $comment->comment_author, $comment->comment_author_IP, $comment_author_domain ) . "\r\n";
+  			$notify_message .= sprintf( __('URL    : %s'), $comment->comment_author_url ) . "\r\n";
+  			$notify_message .= __('Trackback excerpt: ') . "\r\n" . $comment->comment_content . "\r\n\r\n";
+  			break;
+  		case 'pingback':
+  		  if( $GLOBALS['FV_Antispam']->get_plugin_option('disable_pingback_notify') ) {
+  		    return true;
+  		  }
+  			$notify_message  = sprintf( __('A new pingback on the post "%s" is waiting for your approval'), $post->post_title ) . "\r\n";
+  			$notify_message .= get_permalink($comment->comment_post_ID) . "\r\n\r\n";
+  			$notify_message .= sprintf( __('Website : %1$s (IP: %2$s , %3$s)'), $comment->comment_author, $comment->comment_author_IP, $comment_author_domain ) . "\r\n";
+  			$notify_message .= sprintf( __('URL    : %s'), $comment->comment_author_url ) . "\r\n";
+  			$notify_message .= __('Pingback excerpt: ') . "\r\n" . $comment->comment_content . "\r\n\r\n";
+  			break;
+  		default: //Comments
+  			$notify_message  = sprintf( __('A new comment on the post "%s" is waiting for your approval'), $post->post_title ) . "\r\n";
+  			$notify_message .= get_permalink($comment->comment_post_ID) . "\r\n\r\n";
+  			$notify_message .= sprintf( __('Author : %1$s (IP: %2$s , %3$s)'), $comment->comment_author, $comment->comment_author_IP, $comment_author_domain ) . "\r\n";
+  			$notify_message .= sprintf( __('E-mail : %s'), $comment->comment_author_email ) . "\r\n";
+  			$notify_message .= sprintf( __('URL    : %s'), $comment->comment_author_url ) . "\r\n";
+  			$notify_message .= sprintf( __('Whois  : http://ws.arin.net/cgi-bin/whois.pl?queryinput=%s'), $comment->comment_author_IP ) . "\r\n";
+  			$notify_message .= __('Comment: ') . "\r\n" . $comment->comment_content . "\r\n\r\n";
+  			break;
+  	}
+  
+  	$notify_message .= sprintf( __('Approve it: %s'),  admin_url("comment.php?action=approve&c=$comment_id") ) . "\r\n";
+  	if ( EMPTY_TRASH_DAYS )
+  		$notify_message .= sprintf( __('Trash it: %s'), admin_url("comment.php?action=trash&c=$comment_id") ) . "\r\n";
+  	else
+  		$notify_message .= sprintf( __('Delete it: %s'), admin_url("comment.php?action=delete&c=$comment_id") ) . "\r\n";
+  	$notify_message .= sprintf( __('Spam it: %s'), admin_url("comment.php?action=spam&c=$comment_id") ) . "\r\n";
+  
+  	$notify_message .= sprintf( _n('Currently %s comment is waiting for approval. Please visit the moderation panel:',
+   		'Currently %s comments are waiting for approval. Please visit the moderation panel:', $comments_waiting), number_format_i18n($comments_waiting) ) . "\r\n";
+  	$notify_message .= admin_url("edit-comments.php?comment_status=moderated") . "\r\n";
+  
+  	$subject = sprintf( __('[%1$s] Please moderate: "%2$s"'), $blogname, $post->post_title );
+  	$admin_email = get_option('admin_email');
+  	
+  	if( $GLOBALS['FV_Antispam']->get_plugin_option('pingback_notify_email') && ( $comment->comment_type == 'trackback' || $comment->comment_type == 'pingback' ) ) {
+  	   $admin_email = $GLOBALS['FV_Antispam']->get_plugin_option('pingback_notify_email');
+    }
+  	
+  	$message_headers = '';
+  
+  	$notify_message = apply_filters('comment_moderation_text', $notify_message, $comment_id);
+  	$subject = apply_filters('comment_moderation_subject', $subject, $comment_id);
+  	$message_headers = apply_filters('comment_moderation_headers', $message_headers);
+  
+  	@wp_mail($admin_email, $subject, $notify_message, $message_headers);
+  
+  	return true;
+  }
+  
+  else :
+  /// This function is used for Wordpress < 2.5
+  function wp_notify_moderator($comment_id) {
+  	global $wpdb;
+  
+  	if( get_option( "moderation_notify" ) == 0 )
+  		return true; 
+  		
+  	if( $comment->comment_type == 'pingback' || $comment->comment_type == 'trackback' ) {
+  	  if( $GLOBALS['FV_Antispam']->get_plugin_option('disable_pingback_notify') ) {
+		    return true;
+		  }
+  	}
+      
+  	$comment = $wpdb->get_row("SELECT * FROM $wpdb->comments WHERE comment_ID='$comment_id' LIMIT 1");
+  	$post = $wpdb->get_row("SELECT * FROM $wpdb->posts WHERE ID='$comment->comment_post_ID' LIMIT 1");
+  
+  	$comment_author_domain = @gethostbyaddr($comment->comment_author_IP);
+  	$comments_waiting = $wpdb->get_var("SELECT count(comment_ID) FROM $wpdb->comments WHERE comment_approved = '0'");
+  
+  	$notify_message  = sprintf( __('A new comment on the post #%1$s "%2$s" is waiting for your approval'), $post->ID, $post->post_title ) . "\r\n";
+  	$notify_message .= get_permalink($comment->comment_post_ID) . "\r\n\r\n";
+  	$notify_message .= sprintf( __('Author : %1$s (IP: %2$s , %3$s)'), $comment->comment_author, $comment->comment_author_IP, $comment_author_domain ) . "\r\n";
+  	$notify_message .= sprintf( __('E-mail : %s'), $comment->comment_author_email ) . "\r\n";
+  	$notify_message .= sprintf( __('URL    : %s'), $comment->comment_author_url ) . "\r\n";
+  	$notify_message .= sprintf( __('Whois  : http://ws.arin.net/cgi-bin/whois.pl?queryinput=%s'), $comment->comment_author_IP ) . "\r\n";
+  	$notify_message .= __('Comment: ') . "\r\n" . $comment->comment_content . "\r\n\r\n";
+  	$notify_message .= sprintf( __('Approve it: %s'),  get_option('siteurl')."/wp-admin/comment.php?action=mac&c=$comment_id" ) . "\r\n";
+  	$notify_message .= sprintf( __('Delete it: %s'), get_option('siteurl')."/wp-admin/comment.php?action=cdc&c=$comment_id" ) . "\r\n";
+  	$notify_message .= sprintf( __('Spam it: %s'), get_option('siteurl')."/wp-admin/comment.php?action=cdc&dt=spam&c=$comment_id" ) . "\r\n";
+  	$notify_message .= sprintf( __('Currently %s comments are waiting for approval. Please visit the moderation panel:'), $comments_waiting ) . "\r\n";
+  	$notify_message .= get_option('siteurl') . "/wp-admin/moderation.php\r\n";
+  
+  	$subject = sprintf( __('[%1$s] Please moderate: "%2$s"'), get_option('blogname'), $post->post_title );
+  	$admin_email = get_option('admin_email');
+  	
+  	if( $GLOBALS['FV_Antispam']->get_plugin_option('pingback_notify_email') && ( $comment->comment_type == 'trackback' || $comment->comment_type == 'pingback' ) ) {
+  	   $admin_email = $GLOBALS['FV_Antispam']->get_plugin_option('pingback_notify_email');
+    }
+  
+  	$notify_message = apply_filters('comment_moderation_text', $notify_message, $comment_id);
+  	$subject = apply_filters('comment_moderation_subject', $subject, $comment_id);
+  
+  	@wp_mail($admin_email, $subject, $notify_message);
+  
+  	return true;
+  }
+  
+  endif;
+
+endif;
+
 ?>

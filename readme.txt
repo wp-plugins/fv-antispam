@@ -37,13 +37,18 @@ Our studies on our own sites have shown that for every 50 human spam comments a 
 
 == Changelog ==
 
+= 1.8.2 = 
+
+* New function - redirect pingbacks and trackbacks notifications to different email address
+* Or disable pingbacks and trackbacks notifications at all.
+
 = 1.8.1 = 
 
-Bugfix for some templates.
+* Bugfix for some templates.
 
 = 1.8 = 
 
-First public release
+* First public release
 
 == Screenshots ==
 
