@@ -5,15 +5,16 @@ Requires at least: 2.9
 Tested up to: 3.0.1
 Stable tag: trunk
 
-FV Antispam is a powerful and simple antispam plugin. It moves any spambot comments directly to trash and allows Akismet to just deal with human spam.
+FV Antispam is a powerful and simple antispam plugin with no extra CPU load. All spambot comments go directly to trash, allowing Akismet to just deal with human spam.
 
 == Description ==
 FV Antispam is a powerful and simple antispam plugin. FV Antispam moves any spambot (machine written) comments directly to the trash and allows Akismet to just deal with human spam.
-What makes FV Antispam better than any other solution is the very low CPU load. FV Antispam will not burden your hosting or slow down your server. Other effective antispam plugins may get your hosting cancelled. Really. It happened to us, that's why we wrote FV Antispam.
+
+What makes FV Antispam better than any other solution is the very low CPU load. FV Antispam will not burden your hosting or slow down your server. Other effective antispam plugins may get your hosting cancelled. Really. It happened to us with WP SpamFree, that's why we wrote FV Antispam.
 
 = The Problem =
 
-Our studies on our own sites have shown that for every 50 human spam comments a popular weblog will have up to 10,000 machine generated spam. With FV Antispam, Akismet finally becomes a usefull tool again allowing you to browse your spam folder and pull out any Akismet false positives. If you use just Akismet, bots fill your whole spam folder with thousands of comments. It's nearly an impossible task to browse through hundreds or thousands of comments to find one or two false positives.
+Our studies on our own sites have shown that for every 50 human spam comments a popular weblog will have up to 10,000 machine generated spam. With FV Antispam, Akismet finally becomes a useful tool again allowing you to browse your spam folder and pull out any Akismet false positives. If you use just Akismet, bots fill your whole spam folder with thousands of comments. It's nearly an impossible task to browse through hundreds or thousands of comments to find one or two false positives.
 
 = Why choose FV AntiSpam? =
 
@@ -21,11 +22,11 @@ Our studies on our own sites have shown that for every 50 human spam comments a 
 * Effective.
 * Reliable.
 * Zero false positives.
-* Virtually no CPU server load.
+* No additional CPU server load (unlike WP SpamFree for instance)
 
 = How does FV AntiSpam work so well? =
 
-* No detectable signature for spam bots
+* No detectable signature for spam bots (unlike the NoSpamNX author, we believe zero profile is important for long term success)
 * Blacklisted comments are put into trash
 * The spam is moved directly to trash
 * Works hand in hand with Akismet, not trying to replace the collective system but supplement it.
