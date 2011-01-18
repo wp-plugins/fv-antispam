@@ -62,6 +62,10 @@ manually.
 
 == Frequently Asked Questions ==
 
+= All of my messages are recognized as spam, what could be the issue? =
+
+Please make sure that your host uses an up to date version of PCRE library. Version 7.9 2009-04-11 should be enough. Also check the pcre.backtrack_limit value, 100000 seems to be a good standard value on most hosts.
+
 = Why do you put the detected spam messages into trash? =
 
 This way your spam folder is not overwhelmed with all the obvious spam messages. So you can look at this folder to check the spam messages detected by Akismet for example. And with new Wordpress versions, you can also check the trash folder, to make sure that our plugin works correctly and only deletes what's really a spam.
