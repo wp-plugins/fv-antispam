@@ -39,7 +39,7 @@ Our studies on our own sites have shown that for every 50 human spam comments a 
 
 = 1.8.3 = 
 
-* New function - protect Filled in forms against spam
+* New function - protect [Filled In](http://urbangiraffe.com/plugins/filled-in/) forms against spam
 * New function - display comments by default when you enter Comments section in wp-admin Dashboard
 * New function - show counts of comments and pingbacks separately in Comments section in wp-admin Dashboard
 
@@ -79,3 +79,9 @@ Same reason as above question, if a comments is already blacklisted, you don't w
 = I have a problem with my Filled in forms and I suspect it's caused by your plugin =
 
 When you are logged in you should see a notice above each protected Filled in form. You will also see a warning in wp-admin Dashboard if there is any conflict with your Filled in forms.
+
+= Which Comment Preview plugins do you recommend to use with FV Antispam? =
+
+[Live Comment Preview](http://wordpress.org/extend/plugins/live-comment-preview/) works, but you have to change the textarea ID in the live-comment-preview.php file on line 124. You can find out that the ID is by looking into the source code of the page with comment form on it. It will be an unique string of seemingly random numbers and letters like “a7391152e”, so use that.
+
+[jQuery Comment Preview](http://dimox.net/jquery-comment-preview-wordpress-plugin/) is not so lightweight as the Live Comment Preview, but you can set the ID in options, so you don’t have to edit files.
