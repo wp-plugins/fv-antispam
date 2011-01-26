@@ -4,7 +4,7 @@ Plugin Name: FV Antispam
 Plugin URI: http://foliovision.com/seo-tools/wordpress/plugins/fv-antispam
 Description: Powerful and simple antispam plugin. Puts all the spambot comments directly into trash and let's other plugins (Akismet) deal with the rest.
 Author: Foliovision
-Version: 1.8.2
+Version: 1.8.3
 Author URI: http://www.foliovision.com
 */
 
@@ -27,8 +27,20 @@ class FV_Antispam {
     ///
     $this->locale = get_locale();
     if (is_admin()) {
+      /*
+      2011/01/14 - let's hide pings on the WP-admin -> Comments screen by default!
+      */
+      add_action( 'in_admin_header', array( $this, 'in_admin_header' ) );
+      
+      /*
+      Let's also play with the numbers a bit!
+      */
+      add_action( 'comment_status_links', array( $this, 'comment_status_links' ) );
+
       add_action( 'init', array( $this, 'load_plugin_lang' ) );
+      add_action( 'init', array( $this, 'save_options' ) );
       add_action( 'admin_menu', array( $this, 'init_admin_menu' ) );
+      add_action( 'admin_notices', array( &$this, 'filled_in_collision_check') );
       if ($this->is_current_page('home')) {
         add_action( 'admin_head', array( $this, 'show_plugin_head' ) );
       } else if ($this->is_current_page('index')) {
@@ -55,13 +67,175 @@ class FV_Antispam {
       add_action( 'init', array( $this, 'precheck_comment_request' ), 0 );
       add_action( 'preprocess_comment', array( $this, 'verify_comment_request' ), 1 );
       add_action( 'antispam_bee_count', array( $this, 'the_spam_count' ) );
+      
+      /// 2010/12/21
+      if( $_SERVER['REQUEST_METHOD'] == 'POST' && isset ($_POST['filled_in_form']) && $this->get_plugin_option('protect_filledin') ) {
+        add_filter( 'plugins_loaded', array( $this, 'filled_in_check' ), 9 );
+  		}
+  		if( $this->get_plugin_option('protect_filledin') ) {
+  		  add_filter( 'the_content', array( $this, 'the_content' ), 999 );
+  		}
+  		///
+      
       /*if ($this->get_plugin_option('cronjob_enable')) {
         add_action( 'antispam_bee_daily_cronjob', array( $this, 'exe_daily_cronjob' ) );
       }*/
     }
   }
   
-  ///
+  
+  /*function init_scheduled_hook() {
+    if (function_exists('wp_schedule_event')) {
+      if (!wp_next_scheduled('antispam_bee_daily_cronjob')) {
+        wp_schedule_event(time(), 'daily', 'antispam_bee_daily_cronjob');
+      }
+    }
+  }*/
+  
+  
+  /*function clear_scheduled_hook() {
+    if (function_exists('wp_schedule_event')) {
+      if (wp_next_scheduled('antispam_bee_daily_cronjob')) {
+        wp_clear_scheduled_hook('antispam_bee_daily_cronjob');
+      }
+    }
+  }*/
+  
+  
+  function check_user_can() {
+    if (current_user_can('manage_options') === false || current_user_can('edit_plugins') === false || !is_user_logged_in()) {
+      wp_die('You do not have permission to access!');
+    }
+  }
+  
+  
+  /**
+    * Clear the URI for use in onclick events.
+    * 
+    * @param string Comment status links HTML
+    * 
+    * @return string Updated comment status links HTML
+    */ 
+  function comment_status_links( $content ) {
+    if( is_admin() ) {
+      $post_id = isset($_REQUEST['p']) ? (int) $_REQUEST['p'] : 0;
+      
+      //  count total comments per status and type
+      global $wpdb;
+      if ( $post_id > 0 ) {
+  		  $where = $wpdb->prepare( "WHERE comment_post_ID = %d", $post_id );
+      }
+      $count = $wpdb->get_results( "SELECT comment_approved, comment_type, COUNT( * ) AS num_comments FROM {$wpdb->comments} {$where} GROUP BY comment_approved, comment_type" );
+  
+      $count_types = array();
+      foreach( $count AS $count_item ) {
+        if( $count_item->comment_type == '' ) $count_types[$count_item->comment_approved]['comments'] = $count_item->num_comments;
+        else $count_types[$count_item->comment_approved]['pings'] += $count_item->num_comments;
+      }
+  
+      foreach( array( 'moderated' => 0, 'spam' => 'spam', 'trash' => 'trash' ) AS $key => $value ) {
+        $new_count = number_format( intval( $count_types[$value]['comments'] ) ).'/'.number_format( intval( $count_types[$value]['pings'] ) );
+        $content = preg_replace( '@(<li class=\''.$key.'\'>.*?<span class="count">\(<span class="\S+-count">)[\d,]+@', '$1&shy;'.$new_count, $content );
+
+      }
+    }
+    $content[] = '<li class="help"><abbr title="The numbers show counts of comments/pings for each group.">(?)</abbr></li>';
+    return $content; 
+  }
+  
+  
+  function cut_ip_address($ip) {
+    if (!empty($ip)) {
+      return str_replace( strrchr($ip, '.'), '', $ip );
+    }
+  }
+  
+  
+  function delete_spam_comments() {
+    $days = intval($this->get_plugin_option('cronjob_interval'));
+    if (empty($days)) {
+      return false;
+    }
+    $GLOBALS['wpdb']->query( sprintf( "DELETE FROM %s WHERE comment_approved = 'spam' AND SUBDATE(NOW(), %s) > comment_date_gmt", $GLOBALS['wpdb']->comments, $days ) );
+    $GLOBALS['wpdb']->query("OPTIMIZE TABLE `" .$GLOBALS['wpdb']->comments. "`");
+  }
+  
+  
+  function exe_daily_cronjob() {
+    $this->delete_spam_comments();
+    $this->set_plugin_option( 'cronjob_timestamp', time() );
+  }
+  
+  
+  /**
+    * Check if the fake field has been filled in POST and take action
+    * 
+    * @global array $_POST              
+    * 
+    */    
+  function filled_in_check() {
+    if( isset( $_POST[$this->get_filled_in_fake_field_name()] ) && strlen( $_POST[$this->get_filled_in_fake_field_name()] ) ) {
+      unset( $_POST['filled_in_form'] );
+    }
+  }
+  
+  
+  /**
+    * Shows a warning of any of the Filled in form fields matches the fake field. First looks up the forms and then parses posts and pages.
+    * 
+    * @global object WPDB.               
+    * 
+    */    
+  function filled_in_collision_check() {
+    if( !$this->get_plugin_option('protect_filledin') ) {
+      return;
+    }
+    global $wpdb;
+    $forms = $wpdb->get_col( "SELECT name FROM {$wpdb->prefix}filled_in_forms" );
+    
+    if( $forms ) {
+      $where = array();
+      foreach( $forms AS $forms_item ) {
+        $where[] = '( post_content LIKE \'%id="'.$forms_item.'"%\' AND post_status = \'publish\' )';
+      }
+      $where = implode( ' OR ', $where );
+      $posts = $wpdb->get_results( "SELECT ID,post_title,post_content FROM $wpdb->posts WHERE {$where} ORDER BY post_date DESC" );
+      if( $posts ) {
+        $problems = array();
+        foreach( $posts AS $posts_item ) {
+          foreach( $forms AS $forms_item ) {
+            $res = preg_match_all( '@<form.*?id=[\'"]'.$forms_item.'[\'"].*?name=[\'"]'.$this->get_filled_in_fake_field_name().'[\'"].*?</form>@si', $posts_item->post_content, $matches );
+            if( $res ) {
+              $problems[] = array( 'post_id' => $posts_item->ID, 'post_title' => $posts_item->post_title, 'form_name' => $forms_item );
+            } 
+          }
+        }
+        if( $problems ) {
+          $problematic_message = '';
+          foreach( $problems AS $key=>$problems_item ) {
+            $problematic_message .= ' <a title="Post \''.$problems_item['post_title'].'\' containing form \''.$problems_item['form_name'].'\'" href="'.get_bloginfo( 'url' ).'?p='.$problems_item['post_id'].'">'.$problems_item['post_id'].'</a>';
+          }
+          echo '<div class="error fade"><p>FV Antispam detected that following posts contain Filled in forms that conflict with FV Antispam fake field name:'.$problematic_message.'. Please set a different fake field name <a href="'.get_bloginfo( 'wpurl' ).'/wp-admin/options-general.php?page=fv-antispam/fv-antispam.php">here</a>. <a href="http://foliovision.com/seo-tools/wordpress/plugins/fv-antispam/filled-in-protection">Read more</a> about this issue.</p></div>'; 
+        }
+         
+      }
+    }
+  }
+  
+  
+  function flag_comment_request($comment, $is_ping = false) { ///  action part - moves to spam or deletes
+    $this->update_spam_count();
+    add_filter( 'pre_comment_approved', array( $this, 'i_am_spam' ) );
+    return $comment;
+  }
+  
+
+  /**
+    * Sends comment to spam based on the antispam check and blacklist check
+    * 
+    * @param int Comment ID.  
+    * 
+    */ 
   function fv_blacklist_to_trash_post( $id ) {
     $spam_remove = true;//!$this->get_plugin_option('flag_spam');
     $commentdata = get_comment( $id );
@@ -80,7 +254,119 @@ class FV_Antispam {
     }
      
   }
-  ///
+  
+  
+  function get_admin_page($page) {
+    if (empty($page)) {
+      return;
+    }
+    if (function_exists('admin_url')) {
+      return admin_url($page);
+    }
+    return (get_option('siteurl'). '/wp-admin/' .$page);
+  }
+  
+  
+  /**
+    * Returns name of the fake field.          
+    * 
+    * @return string Fake field name.
+    */    
+  function get_filled_in_fake_field_name() {
+    $name = $this->get_plugin_option('protect_filledin_field');
+    if( !$name ) {
+      $name = 'comment';
+    }
+    return $name;
+  }
+    
+  
+  function get_plugin_option($field) {
+    if (!$options = wp_cache_get('fv_antispam')) {
+      $options = get_option('fv_antispam');
+      wp_cache_set( 'fv_antispam', $options );
+    }
+    return @$options[$field];
+  }
+  
+  
+  function get_spam_count() {
+    return number_format_i18n(
+      $this->get_plugin_option('spam_count')
+    );
+  }
+  
+    
+  function i_am_spam($approved) { ///  moves to spam
+    return 'spam';
+  }
+  
+  
+  /**
+    * Change the request to show only comments, it no type specified
+    * 
+    * @global array $_GET, $_SERVER
+    *                              
+    */   
+  function in_admin_header() {
+    if( stripos( $_SERVER['REQUEST_URI'], 'edit-comments.php' ) !== FALSE ) {
+      if( !isset($_GET['comment_type'] ) ) {
+        $_GET['comment_type'] = 'comment';
+      }
+    }
+  }
+  
+  
+  function init_admin_menu() {
+    add_options_page( 'FV Antispam', 'FV Antispam', ($this->is_min_wp('2.8') ? 'manage_options' : 9), __FILE__, array( $this, 'show_admin_menu' ) );
+  }
+  
+  
+  function init_action_links($links, $file) {
+    if ($this->basename == $file) {
+      return array_merge( array( sprintf( '<a href="options-general.php?page=%s">%s</a>', $this->basename, __('Settings') ) ), $links );
+    }
+    return $links;
+  }
+  
+  
+  function init_plugin_options() {
+    add_option( 'fv_antispam', array( 'trash_banned' => true, 'protect_filledin' => true ) );
+    /*$this->migrate_old_options();
+    if ($this->get_plugin_option('cronjob_enable')) {
+      $this->init_scheduled_hook();
+    }*/
+  }
+  
+  
+  function init_row_meta($links, $file) {
+    if ($this->basename == $file) {
+      return array_merge( $links, array( sprintf( '<a href="options-general.php?page=%s">%s</a>', $this->basename,  __('Settings') ) ) );
+    }
+    return $links;
+  }
+  
+  
+  function is_current_page($page) {
+    switch($page) {
+      case 'home':
+        return (isset($_REQUEST['page']) && $_REQUEST['page'] == $this->basename);
+      case 'index':
+      case 'plugins':
+        return ($GLOBALS['pagenow'] == sprintf('%s.php', $page));
+    }
+    return false;
+  }
+    
+    
+  function is_min_wp($version) {
+    return version_compare( $GLOBALS['wp_version'], $version. 'alpha', '>=' );
+  }
+
+  
+  function is_wp_touch() {
+    return strpos(TEMPLATEPATH, 'wptouch');
+  }
   
   
   function load_plugin_lang() {
@@ -94,178 +380,73 @@ class FV_Antispam {
     }
   }
   
-  function init_action_links($links, $file) {
-    if ($this->basename == $file) {
-      return array_merge( array( sprintf( '<a href="options-general.php?page=%s">%s</a>', $this->basename, __('Settings') ) ), $links );
+  
+  function precheck_comment_request() { ///  detect spam here
+    if (is_feed() || is_trackback() || $this->is_wp_touch()) {
+      return;
     }
-    return $links;
+    $request_url = @$_SERVER['REQUEST_URI'];
+    $hidden_field = @$_POST['comment'];
+    $plugin_field = @$_POST[$this->protect($_POST['comment_post_ID'])];
+    if (empty($_POST) || empty($request_url) || strpos($request_url, 'wp-comments-post.php') === false) {
+      return;
+    }
+    if (empty($hidden_field) && !empty($plugin_field)) {
+      $_POST['comment'] = $plugin_field;
+      unset($_POST[$this->protect($_POST['comment_post_ID'])]);
+    } else {
+      $_POST['bee_spam'] = 1;
+    }
   }
   
-  function init_row_meta($links, $file) {
-    if ($this->basename == $file) {
-      return array_merge( $links, array( sprintf( '<a href="options-general.php?page=%s">%s</a>', $this->basename,  __('Settings') ) ) );
-    }
-    return $links;
-  }
   
-  function init_plugin_options() {
-    add_option( 'fv_antispam', array( 'trash_banned' => true ) );
-    /*$this->migrate_old_options();
-    if ($this->get_plugin_option('cronjob_enable')) {
-      $this->init_scheduled_hook();
-    }*/
-  }
-  
-  /*function init_scheduled_hook() {
-    if (function_exists('wp_schedule_event')) {
-      if (!wp_next_scheduled('antispam_bee_daily_cronjob')) {
-        wp_schedule_event(time(), 'daily', 'antispam_bee_daily_cronjob');
-      }
-    }
-  }*/
-  
-  ///
+  /**
+    * Generate the unique hash key.
+    * 
+    * @param int $postID Current post ID.             
+    * 
+    * @return string Hash key.
+    */    
   static function protect($postID) {
     $postID = 0;  //  some templates are not able to give us the post ID when submitting comment, so we turn this of for now
     return 'a'.substr(md5(get_bloginfo('url').$postID), 0, 8);
   }
-  ///
   
-  /*function clear_scheduled_hook() {
-    if (function_exists('wp_schedule_event')) {
-      if (wp_next_scheduled('antispam_bee_daily_cronjob')) {
-        wp_clear_scheduled_hook('antispam_bee_daily_cronjob');
-      }
-    }
-  }*/
   
-  function get_plugin_option($field) {
-    if (!$options = wp_cache_get('fv_antispam')) {
-      $options = get_option('fv_antispam');
-      wp_cache_set( 'fv_antispam', $options );
-    }
-    return @$options[$field];
-  }
-  
-  function set_plugin_option($field, $value) {
-    if (empty($field)) {
+  /**
+    * Adds fake field.
+    * 
+    * @global object Current post object.                
+    * 
+    */ 
+  function replace_comment_field() {
+    if (is_feed() || is_trackback() || $this->is_wp_touch()) {
       return;
     }
-    $this->set_plugin_options( array( $field => $value ) );
-  }
-  
-  function set_plugin_options($data) {
-    if (empty($data)) {
+    if (!is_singular() /*&& !$this->get_plugin_option('always_allowed')*/ ) {
       return;
     }
-    $options = array_merge( (array)get_option('fv_antispam'), $data );
-    update_option( 'fv_antispam', $options );
-    wp_cache_set( 'fv_antispam', $options );
-  }
-  
-  /*function migrate_old_options() {
-    if (get_option('antispam_bee_cronjob_timestamp') === false) {
-      return;
-    }
-    $fields = array(
-      'flag_spam',
-      'ignore_pings',
-      'ignore_filter',
-      'ignore_type',
-      'no_notice',
-      'cronjob_enable',
-      'cronjob_interval',
-      'cronjob_timestamp',
-      'spam_count',
-      'dashboard_count'
-    );
-    foreach($fields as $field) {
-      $this->set_plugin_option( $field, get_option('antispam_bee_' .$field) );
-    }
-    $GLOBALS['wpdb']->query("DELETE FROM `" .$GLOBALS['wpdb']->options. "` WHERE option_name LIKE 'antispam_bee_%'");
-    $GLOBALS['wpdb']->query("OPTIMIZE TABLE `" .$GLOBALS['wpdb']->options. "`");
-  }*/
-  
-  function init_admin_menu() {
-    add_options_page( 'FV Antispam', 'FV Antispam', ($this->is_min_wp('2.8') ? 'manage_options' : 9), __FILE__, array( $this, 'show_admin_menu' ) );
-  }
-  
-  function exe_daily_cronjob() {
-    $this->delete_spam_comments();
-    $this->set_plugin_option( 'cronjob_timestamp', time() );
-  }
-  
-  function delete_spam_comments() {
-    $days = intval($this->get_plugin_option('cronjob_interval'));
-    if (empty($days)) {
-      return false;
-    }
-    $GLOBALS['wpdb']->query( sprintf( "DELETE FROM %s WHERE comment_approved = 'spam' AND SUBDATE(NOW(), %s) > comment_date_gmt", $GLOBALS['wpdb']->comments, $days ) );
-    $GLOBALS['wpdb']->query("OPTIMIZE TABLE `" .$GLOBALS['wpdb']->comments. "`");
-  }
-  
-  function is_min_wp($version) {
-    return version_compare( $GLOBALS['wp_version'], $version. 'alpha', '>=' );
-  }
-  
-  function is_wp_touch() {
-    return strpos(TEMPLATEPATH, 'wptouch');
-  }
-  
-  function is_current_page($page) {
-    switch($page) {
-      case 'home':
-        return (isset($_REQUEST['page']) && $_REQUEST['page'] == $this->basename);
-      case 'index':
-      case 'plugins':
-        return ($GLOBALS['pagenow'] == sprintf('%s.php', $page));
-    }
-    return false;
-  }
-  
-  function check_user_can() {
-    if (current_user_can('manage_options') === false || current_user_can('edit_plugins') === false || !is_user_logged_in()) {
-      wp_die('You do not have permission to access!');
-    }
-  }
-  
-  function show_dashboard_count() {
-    echo sprintf(
-    '<tr>
-    <td class="first b b-tags"></td>
-    <td class="t tags"></td>
-    <td class="b b-spam" style="font-size:18px">%s</td>
-    <td class="last t">%s</td>
-    </tr>',
-    $this->get_spam_count(),
-    __('Blocked', 'antispam_bee')
+    global $post;
+    ob_start(
+      create_function(
+      '$input',
+      /*
+      'return preg_replace("#<textarea(.*?)name=([\"\'])comment([\"\'])(.+?)</textarea>#s", "<textarea$1name=$2' .$this->protect. '$3$4</textarea><textarea name=\"comment\" rows=\"1\" cols=\"1\" style=\"display:none\"></textarea>", $input, 1);'*/
+      /*'return preg_replace("#<textarea(.*?)name=([\"\'])comment([\"\'])(.+?)</textarea>#s", "<textarea$1name=$2' .$this->protect($post->ID). '$3$4</textarea><textarea name=\"comment\" rows=\"1\" cols=\"1\" class=\"comment-field\"></textarea><style>.comment-field { display: none; }</style>", $input, 1);'*/
+      'return preg_replace_callback("#wp-comments-post.php\".*?(<textarea.*?(class=\".*?\")?.*?</textarea>)#s", "FV_Antispam::replace_textarea" , $input, 1);'
+      )
     );
   }
   
-  function show_plugin_notices() {
-  echo sprintf(
-  '<div class="error"><p><strong>Antispam Bee</strong> %s</p></div>',
-  __('requires at least WordPress 2.3', 'antispam_bee')
-  );
-  }
   
-  function get_admin_page($page) {
-    if (empty($page)) {
-      return;
-    }
-    if (function_exists('admin_url')) {
-      return admin_url($page);
-    }
-    return (get_option('siteurl'). '/wp-admin/' .$page);
-  }
-  
-  function cut_ip_address($ip) {
-    if (!empty($ip)) {
-      return str_replace( strrchr($ip, '.'), '', $ip );
-    }
-  }
-  
-  //  new textarea which is nearly the same + css
+  /**
+    * Callback which adds fake field.
+    * 
+    * @param string Page content from OB.
+    * @global object Current post object.                
+    * 
+    * @return string New page content.
+    */    
   static function replace_textarea( $match ) {
     global $post;
     
@@ -297,42 +478,391 @@ class FV_Antispam {
     return $match[0].'<!-- </form> -->'.$new.$css;
   }
   
-  function replace_comment_field() {
-    if (is_feed() || is_trackback() || $this->is_wp_touch()) {
+  
+  function save_options() {
+    if ( $_POST['fv_antispam_submit'] ) {
+      check_admin_referer('fvantispam');
+      $options = array(
+        //'flag_spam'=> (isset($_POST['antispam_bee_flag_spam']) ? (int)$_POST['antispam_bee_flag_spam'] : 0),
+        'ignore_pings'=> (isset($_POST['antispam_bee_ignore_pings']) ? (int)$_POST['antispam_bee_ignore_pings'] : 0),
+        //'ignore_filter'=> (isset($_POST['antispam_bee_ignore_filter']) ? (int)$_POST['antispam_bee_ignore_filter'] : 0),
+        //'ignore_type'=> (isset($_POST['antispam_bee_ignore_type']) ? (int)$_POST['antispam_bee_ignore_type'] : 0),
+        //'no_notice'=> (isset($_POST['antispam_bee_no_notice']) ? (int)$_POST['antispam_bee_no_notice'] : 0),
+        //'email_notify'=> (isset($_POST['antispam_bee_email_notify']) ? (int)$_POST['antispam_bee_email_notify'] : 0),
+        //'cronjob_enable'=> (isset($_POST['antispam_bee_cronjob_enable']) ? (int)$_POST['antispam_bee_cronjob_enable'] : 0),
+        //'cronjob_interval'=> (isset($_POST['antispam_bee_cronjob_interval']) ? (int)$_POST['antispam_bee_cronjob_interval'] : 0),
+        //'dashboard_count'=> (isset($_POST['antispam_bee_dashboard_count']) ? (int)$_POST['antispam_bee_dashboard_count'] : 0),
+        //'advanced_check'=> (isset($_POST['antispam_bee_advanced_check']) ? (int)$_POST['antispam_bee_advanced_check'] : 0),
+        //'already_commented'=> (isset($_POST['antispam_bee_already_commented']) ? (int)$_POST['antispam_bee_already_commented'] : 0),
+        //'always_allowed'=> (isset($_POST['antispam_bee_always_allowed']) ? (int)$_POST['antispam_bee_always_allowed'] : 0),
+        ///
+        'my_own_styling'=> (isset($_POST['my_own_styling']) ? (int)$_POST['my_own_styling'] : 0),
+        'trash_banned'=> (isset($_POST['trash_banned']) ? (int)$_POST['trash_banned'] : 0),
+        'protect_filledin'=> (isset($_POST['protect_filledin']) ? (int)$_POST['protect_filledin'] : 0),
+        'protect_filledin_disable_notice'=> (isset($_POST['protect_filledin_disable_notice']) ? (int)$_POST['protect_filledin_disable_notice'] : 0),
+        'protect_filledin_field'=> $_POST['protect_filledin_field'],
+        'disable_pingback_notify'=> (isset($_POST['disable_pingback_notify']) ? (int)$_POST['disable_pingback_notify'] : 0),
+        'pingback_notify_email'=> $_POST['pingback_notify_email']
+        ///
+      );
+      if (empty($options['cronjob_interval'])) {
+        $options['cronjob_enable'] = 0;
+      }
+      /*if ($options['cronjob_enable'] && !$this->get_plugin_option('cronjob_enable')) {
+        $this->init_scheduled_hook();
+      } else if (!$options['cronjob_enable'] && $this->get_plugin_option('cronjob_enable')) {
+        $this->clear_scheduled_hook();
+      }*/
+      
+      
+      $this->set_plugin_options($options);
+      add_action( 'admin_notices', array( &$this, 'save_options_notice') );
+    }
+  }
+  
+  
+  function save_options_notice() {
+    ?>
+    <div id="message" class="updated fade">
+      <p>
+        <strong><?php _e('Settings saved.') ?></strong>
+      </p>
+    </div>
+    <?php
+  }
+      
+  
+  function set_plugin_option($field, $value) {
+    if (empty($field)) {
       return;
     }
-    if (!is_singular() /*&& !$this->get_plugin_option('always_allowed')*/ ) {
+    $this->set_plugin_options( array( $field => $value ) );
+  }
+  
+  
+  function set_plugin_options($data) {
+    if (empty($data)) {
       return;
     }
-    global $post;
-    ob_start(
-      create_function(
-      '$input',
-      /*
-      'return preg_replace("#<textarea(.*?)name=([\"\'])comment([\"\'])(.+?)</textarea>#s", "<textarea$1name=$2' .$this->protect. '$3$4</textarea><textarea name=\"comment\" rows=\"1\" cols=\"1\" style=\"display:none\"></textarea>", $input, 1);'*/
-      /*'return preg_replace("#<textarea(.*?)name=([\"\'])comment([\"\'])(.+?)</textarea>#s", "<textarea$1name=$2' .$this->protect($post->ID). '$3$4</textarea><textarea name=\"comment\" rows=\"1\" cols=\"1\" class=\"comment-field\"></textarea><style>.comment-field { display: none; }</style>", $input, 1);'*/
-      'return preg_replace_callback("#wp-comments-post.php\".*?(<textarea.*?(class=\".*?\")?.*?</textarea>)#s", "FV_Antispam::replace_textarea" , $input, 1);'
-      )
+    $options = array_merge( (array)get_option('fv_antispam'), $data );
+    update_option( 'fv_antispam', $options );
+    wp_cache_set( 'fv_antispam', $options );
+  }
+  
+  
+  /*function migrate_old_options() {
+    if (get_option('antispam_bee_cronjob_timestamp') === false) {
+      return;
+    }
+    $fields = array(
+      'flag_spam',
+      'ignore_pings',
+      'ignore_filter',
+      'ignore_type',
+      'no_notice',
+      'cronjob_enable',
+      'cronjob_interval',
+      'cronjob_timestamp',
+      'spam_count',
+      'dashboard_count'
+    );
+    foreach($fields as $field) {
+      $this->set_plugin_option( $field, get_option('antispam_bee_' .$field) );
+    }
+    $GLOBALS['wpdb']->query("DELETE FROM `" .$GLOBALS['wpdb']->options. "` WHERE option_name LIKE 'antispam_bee_%'");
+    $GLOBALS['wpdb']->query("OPTIMIZE TABLE `" .$GLOBALS['wpdb']->options. "`");
+  }*/
+
+
+  function show_admin_menu() {
+    $this->check_user_can();
+    ?>
+
+    <div class="wrap">
+    <?php if ($this->is_min_wp('2.7')) { ?>
+    <div id="icon-options-general" class="icon32"><br /></div>
+    <?php } ?>
+    <h2>FV Antispam</h2>
+    
+    <form method="post" action="">
+      <?php wp_nonce_field('fvantispam') ?>
+      <div id="poststuff" class="ui-sortable">
+      <div class="postbox">
+      <h3>
+      <?php _e('Settings') ?>
+      </h3>
+      <div class="inside">
+        <!--<table class="form-table">
+          <tr>
+            <td>
+              <label for="antispam_bee_flag_spam">
+              <input type="checkbox" name="antispam_bee_flag_spam" id="antispam_bee_flag_spam" value="1" <?php checked($this->get_plugin_option('flag_spam'), 1) ?> />
+              <?php _e('Mark as Spam, do not delete', 'antispam_bee') ?> <?php $this->show_help_link('flag_spam') ?>
+              </label>
+            </td>
+          </tr>
+          <tr>
+            <td class="shift">
+              <input type="checkbox" name="antispam_bee_ignore_filter" id="antispam_bee_ignore_filter" value="1" <?php checked($this->get_plugin_option('ignore_filter'), 1) ?> />
+              <?php _e('Limit on', 'antispam_bee') ?> <select name="antispam_bee_ignore_type"><?php foreach(array(1 => __('Comments'), 2 => __('Pings')) as $key => $value) {
+              echo '<option value="' .$key. '" ';
+              selected($this->get_plugin_option('ignore_type'), $key);
+              echo '>' .$value. '</option>';
+              } ?>
+              </select> <?php $this->show_help_link('ignore_filter') ?>
+            </td>
+          </tr>
+          <tr>
+            <td class="shift">
+              <input type="checkbox" name="antispam_bee_cronjob_enable" id="antispam_bee_cronjob_enable" value="1" <?php checked($this->get_plugin_option('cronjob_enable'), 1) ?> />
+              <?php echo sprintf(__('Spam will be automatically deleted after %s days', 'antispam_bee'), '<input type="text" name="antispam_bee_cronjob_interval" value="' .$this->get_plugin_option('cronjob_interval'). '" class="small-text" />') ?>&nbsp;<?php $this->show_help_link('cronjob_enable') ?>
+              <?php echo ($this->get_plugin_option('cronjob_timestamp') ? ('&nbsp;<span class="setting-description">(' .__('Last', 'antispam_bee'). ': '. date_i18n('d.m.Y H:i:s', $this->get_plugin_option('cronjob_timestamp')). ')</span>') : '') ?>
+            </td>
+          </tr>
+          <tr>
+            <td class="shift">
+              <label for="antispam_bee_no_notice">
+              <input type="checkbox" name="antispam_bee_no_notice" id="antispam_bee_no_notice" value="1" <?php checked($this->get_plugin_option('no_notice'), 1) ?> />
+              <?php _e('Hide the &quot;MARKED AS SPAM&quot; note', 'antispam_bee') ?>
+              </label>
+            </td>
+          </tr>
+          <tr>
+            <td class="shift">
+              <label for="antispam_bee_email_notify">
+              <input type="checkbox" name="antispam_bee_email_notify" id="antispam_bee_email_notify" value="1" <?php checked($this->get_plugin_option('email_notify'), 1) ?> />
+              <?php _e('Send an admin email when new spam item incoming', 'antispam_bee') ?>
+              </label>
+            </td>
+          </tr>
+        </table>-->
+        <table class="form-table">
+          <tr>
+            <td>
+              <label for="antispam_bee_ignore_pings">
+              <input type="checkbox" name="antispam_bee_ignore_pings" id="antispam_bee_ignore_pings" value="1" <?php checked($this->get_plugin_option('ignore_pings'), 1) ?> />
+              <?php _e('Do not check trackbacks / pingbacks', 'antispam_bee') ?>
+              </label>
+            </td>
+          </tr>
+          <?php if ($this->is_min_wp('2.7')) { ?>
+            <!--<tr>
+              <td>
+                <label for="antispam_bee_dashboard_count">
+                <input type="checkbox" name="antispam_bee_dashboard_count" id="antispam_bee_dashboard_count" value="1" <?php checked($this->get_plugin_option('dashboard_count'), 1) ?> />
+                <?php _e('Display blocked comments count on the dashboard', 'antispam_bee') ?> <?php $this->show_help_link('dashboard_count') ?>
+                </label>
+              </td>
+            </tr>-->
+          <?php } ?>
+          <!--<tr>
+            <td>
+              <label for="antispam_bee_advanced_check">
+              <input type="checkbox" name="antispam_bee_advanced_check" id="antispam_bee_advanced_check" value="1" <?php checked($this->get_plugin_option('advanced_check'), 1) ?> />
+              <?php _e('Enable stricter inspection for incomming comments', 'antispam_bee') ?> <?php $this->show_help_link('advanced_check') ?>
+              </label>
+            </td>
+          </tr>-->
+          <!--<tr>
+            <td>
+              <label for="antispam_bee_already_commented">
+              <input type="checkbox" name="antispam_bee_already_commented" id="antispam_bee_already_commented" value="1" <?php checked($this->get_plugin_option('already_commented'), 1) ?> />
+              <?php _e('Do not check for spam if the author has already commented and approved', 'antispam_bee') ?> <?php $this->show_help_link('already_commented') ?>
+              </label>
+            </td>
+          </tr>-->
+          <!--<tr>
+            <td>
+              <label for="antispam_bee_always_allowed">
+              <input type="checkbox" name="antispam_bee_always_allowed" id="antispam_bee_always_allowed" value="1" <?php checked($this->get_plugin_option('always_allowed'), 1) ?> />
+              <?php _e('Comments are also used outside of posts and pages', 'antispam_bee') ?> <?php $this->show_help_link('always_allowed') ?>
+              </label>
+            </td>
+          </tr>-->
+          <tr>
+            <td>
+              <label for="my_own_styling">
+              <input type="checkbox" name="my_own_styling" id="my_own_styling" value="1" <?php checked($this->get_plugin_option('my_own_styling'), 1) ?> />
+              <?php _e('I\'ll put in my own styling', 'antispam_bee') ?>
+              </label>
+            </td>
+          </tr>
+          <tr>
+            <td>
+              <label for="trash_banned">
+              <input type="checkbox" name="trash_banned" id="trash_banned" value="1" <?php checked($this->get_plugin_option('trash_banned'), 1) ?> />
+              <?php _e('Trash banned (blacklisted) comments, don\'t just mark them as spam', 'antispam_bee') ?>
+              </label>
+            </td>
+          </tr>
+          <tr>
+            <td>
+              <div class="postbox">
+                <h3>Pingback/trackback notification tweaks</h3>
+                <div class="inside">
+                  <table class="form-table">
+                    <tr>
+                      <td>
+                      Enter alternative email address for pingback and trackback notifications<br />
+                        <label for="pingback_notify_email">
+                        <input type="text" class="regular-text" name="pingback_notify_email" id="pingback_notify_email" value="<?php if( function_exists( 'esc_attr' ) ) echo esc_attr( $this->get_plugin_option('pingback_notify_email') ); else echo ( $this->get_plugin_option('pingback_notify_email') ); ?>" />
+                        <span class="description"><?php _e('Leave empty if you want to use the default address from General Settings', 'antispam_bee') ?> <?php $this->show_help_link('disable_pingback_notify') ?></span>
+                        </label>
+                      </td>
+                    </tr>
+                    <tr>
+                      <td>
+                      Or<br />
+                        <label for="disable_pingback_notify">
+                        <input type="checkbox" name="disable_pingback_notify" id="disable_pingback_notify" value="1" <?php checked($this->get_plugin_option('disable_pingback_notify'), 1) ?> />
+                        <?php _e('Disable notifications for pingbacks and trackbacks', 'antispam_bee') ?> 
+                        </label>
+                      </td>
+                    </tr>           
+                  </table>
+                </div>
+              </div>
+            </td>
+          </tr>
+          <tr>
+            <td>
+              <div class="postbox">
+                <h3>Filled In forms spam protection</h3>
+                <div class="inside">
+                  <table class="form-table">
+                    <tr>
+                      <td>
+                        <label for="protect_filledin">
+                        <input type="checkbox" name="protect_filledin" id="protect_filledin" value="1" <?php checked($this->get_plugin_option('protect_filledin'), 1) ?> />
+                        <?php _e('Protect Filled in forms', 'antispam_bee') ?>
+                        </label>
+                      </td>
+                    </tr>
+                    <tr>
+                      <td>
+                      Enter fake field name<br />
+                        <label for="protect_filledin_field">
+                        <input type="text" class="regular-text" name="protect_filledin_field" id="protect_filledin_field" value="<?php if( function_exists( 'esc_attr' ) ) echo esc_attr( $this->get_plugin_option('protect_filledin_field') ); else echo ( $this->get_plugin_option('protect_filledin_field') ); ?>" />
+                        <span class="description"><?php _e('Leave empty if you want to use the default', 'antispam_bee') ?> <?php $this->show_help_link('protect_filledin_field') ?></span>
+                        </label>
+                      </td>
+                    </tr>
+                    <tr>
+                      <td>
+                        <label for="protect_filledin_disable_notice">
+                        <input type="checkbox" name="protect_filledin_disable_notice" id="protect_filledin_disable_notice" value="1" <?php checked($this->get_plugin_option('protect_filledin_disable_notice'), 1) ?> />
+                        <?php _e('Disable protection notice', 'antispam_bee') ?> <span class="description"><?php _e('(Logged in administrators normall see a notice that FV Antispam is protecting a Filled in form)', 'antispam_bee') ?></span>
+                        </label>
+                      </td>
+                    </tr>
+                             
+                  </table>
+                </div>
+              </div>
+            </td>
+          </tr>
+        </table>
+        <p>
+        <input type="submit" name="fv_antispam_submit" class="button-primary" value="<?php _e('Save Changes') ?>" />
+        </p>
+      </div>
+      </div>
+      </div>
+    </form>
+    </div>
+  <?php }
+  
+  
+  function show_dashboard_count() {
+    echo sprintf(
+    '<tr>
+    <td class="first b b-tags"></td>
+    <td class="t tags"></td>
+    <td class="b b-spam" style="font-size:18px">%s</td>
+    <td class="last t">%s</td>
+    </tr>',
+    $this->get_spam_count(),
+    __('Blocked', 'antispam_bee')
     );
   }
   
-  function precheck_comment_request() { ///  detect spam here
-    if (is_feed() || is_trackback() || $this->is_wp_touch()) {
-      return;
-    }
-    $request_url = @$_SERVER['REQUEST_URI'];
-    $hidden_field = @$_POST['comment'];
-    $plugin_field = @$_POST[$this->protect($_POST['comment_post_ID'])];
-    if (empty($_POST) || empty($request_url) || strpos($request_url, 'wp-comments-post.php') === false) {
-      return;
-    }
-    if (empty($hidden_field) && !empty($plugin_field)) {
-      $_POST['comment'] = $plugin_field;
-      unset($_POST[$this->protect($_POST['comment_post_ID'])]);
-    } else {
-      $_POST['bee_spam'] = 1;
-    }
+  
+  function show_help_link($anchor) {
   }
+  
+  
+  function show_plugin_notices() {
+    echo sprintf(
+    '<div class="error"><p><strong>Antispam Bee</strong> %s</p></div>',
+    __('requires at least WordPress 2.3', 'antispam_bee')
+    );
+  }
+  
+  
+  function show_plugin_head() {
+    wp_enqueue_script('jquery'); ?>
+    <style type="text/css">
+    <?php if ($this->is_min_wp('2.7')) { ?>
+    div.less {
+      background: none;
+    }
+    <?php } ?>
+    select {
+      margin: 0 0 -3px;
+    }
+    input.small-text {
+      margin: -5px 0;
+    }
+    td.shift {
+      padding-left: 30px;
+    }
+    </style>
+    <script type="text/javascript">
+    jQuery(document).ready(
+      function($) {
+        function manage_options() {
+          var id = 'antispam_bee_flag_spam';
+          $('#' + id).parents('.form-table').find('input[id!="' + id + '"]').attr('disabled', !$('#' + id).attr('checked'));
+        }
+        $('#antispam_bee_flag_spam').click(manage_options);
+        manage_options();
+      }
+    );
+    </script>
+  <?php }
+  
+  
+  /**
+    * Shows unapproved comments bellow posts if user can moderate_comments. Hooked to comments_array. In WP, all the unapproved comments are shown both to contributors and authors in wp-admin, but we don't do that in frontend.
+    * 
+    * @param string $content Post content.             
+    * 
+    * @return string Content with fake field added.
+    */    
+  function the_content( $content ) {
+    if( stripos( $content, '<input type="hidden" name="filled_in_form" ' ) === FALSE ) {  //  first check if there's any filled in form
+      return $content;
+    }
+    preg_match_all( '~<form[\s\S]*?</form>~', $content, $forms );
+    
+    foreach( $forms[0] AS $form ) {
+      
+      if( current_user_can('manage_options') && !$this->get_plugin_option('protect_filledin_disable_notice') ) {
+        $protection_notice = '<p><small>(Note for WP Admins: Form Protected by <a href="http://foliovision.com/seo-tools/wordpress/plugins/fv-antispam/filled-in-protection">FV Antispam</a>)</small></p>';
+      }
+      
+      $form_protected = preg_replace( '~(<form[\s\S]*?)(<input type="hidden" name="filled_in_form" value="\d+"/>)([\s\S]*?</form>)~', $protection_notice.'$1$2<textarea id="'.$this->get_filled_in_fake_field_name().'" name="'.$this->get_filled_in_fake_field_name().'" rows="12" cols="40" style="display:none;"></textarea>$3', $form );
+      $content = str_replace( $form, $form_protected, $content );
+    }
+
+    return $content;
+  }
+  
+  
+  function update_spam_count() {
+    $this->set_plugin_option( 'spam_count', intval($this->get_plugin_option('spam_count') + 1) );
+  }
+  
   
   function verify_comment_request($comment) { ///  detect spam here
 
@@ -382,16 +912,7 @@ class FV_Antispam {
     }
     return $comment;
   }
-  
-  function flag_comment_request($comment, $is_ping = false) { ///  action part - moves to spam or deletes
-    $this->update_spam_count();
-    add_filter( 'pre_comment_approved', array( $this, 'i_am_spam' ) );
-    return $comment;
-  }
-  
-  function i_am_spam($approved) { ///  moves to spam
-    return 'spam';
-  }
+ 
   
   function send_email_notify($comment) {
     $email = get_bloginfo('admin_email');
@@ -408,256 +929,20 @@ class FV_Antispam {
     );
   }
   
-  function get_spam_count() {
-    return number_format_i18n(
-      $this->get_plugin_option('spam_count')
-    );
-  }
   
   function the_spam_count() {
     echo $this->get_spam_count();
   }
-  
-  function update_spam_count() {
-    $this->set_plugin_option( 'spam_count', intval($this->get_plugin_option('spam_count') + 1) );
-  }
-  
-  function show_help_link($anchor) {
-
-  }
-  
-  function show_plugin_head() {
-    wp_enqueue_script('jquery'); ?>
-  <style type="text/css">
-  <?php if ($this->is_min_wp('2.7')) { ?>
-  div.less {
-    background: none;
-  }
-  <?php } ?>
-  select {
-    margin: 0 0 -3px;
-  }
-  input.small-text {
-    margin: -5px 0;
-  }
-  td.shift {
-    padding-left: 30px;
-  }
-  </style>
-  <script type="text/javascript">
-  jQuery(document).ready(
-    function($) {
-      function manage_options() {
-        var id = 'antispam_bee_flag_spam';
-        $('#' + id).parents('.form-table').find('input[id!="' + id + '"]').attr('disabled', !$('#' + id).attr('checked'));
-      }
-      $('#antispam_bee_flag_spam').click(manage_options);
-      manage_options();
-    }
-  );
-  </script>
-  <?php }
-  
-  function show_admin_menu() {
-  $this->check_user_can();
-  if (!empty($_POST)) {
-  check_admin_referer('antispam_bee');
-  $options = array(
-    //'flag_spam'=> (isset($_POST['antispam_bee_flag_spam']) ? (int)$_POST['antispam_bee_flag_spam'] : 0),
-    'ignore_pings'=> (isset($_POST['antispam_bee_ignore_pings']) ? (int)$_POST['antispam_bee_ignore_pings'] : 0),
-    //'ignore_filter'=> (isset($_POST['antispam_bee_ignore_filter']) ? (int)$_POST['antispam_bee_ignore_filter'] : 0),
-    //'ignore_type'=> (isset($_POST['antispam_bee_ignore_type']) ? (int)$_POST['antispam_bee_ignore_type'] : 0),
-    //'no_notice'=> (isset($_POST['antispam_bee_no_notice']) ? (int)$_POST['antispam_bee_no_notice'] : 0),
-    //'email_notify'=> (isset($_POST['antispam_bee_email_notify']) ? (int)$_POST['antispam_bee_email_notify'] : 0),
-    //'cronjob_enable'=> (isset($_POST['antispam_bee_cronjob_enable']) ? (int)$_POST['antispam_bee_cronjob_enable'] : 0),
-    //'cronjob_interval'=> (isset($_POST['antispam_bee_cronjob_interval']) ? (int)$_POST['antispam_bee_cronjob_interval'] : 0),
-    //'dashboard_count'=> (isset($_POST['antispam_bee_dashboard_count']) ? (int)$_POST['antispam_bee_dashboard_count'] : 0),
-    //'advanced_check'=> (isset($_POST['antispam_bee_advanced_check']) ? (int)$_POST['antispam_bee_advanced_check'] : 0),
-    //'already_commented'=> (isset($_POST['antispam_bee_already_commented']) ? (int)$_POST['antispam_bee_already_commented'] : 0),
-    //'always_allowed'=> (isset($_POST['antispam_bee_always_allowed']) ? (int)$_POST['antispam_bee_always_allowed'] : 0),
-    ///
-    'my_own_styling'=> (isset($_POST['my_own_styling']) ? (int)$_POST['my_own_styling'] : 0),
-    'trash_banned'=> (isset($_POST['trash_banned']) ? (int)$_POST['trash_banned'] : 0),
-    'disable_pingback_notify'=> (isset($_POST['disable_pingback_notify']) ? (int)$_POST['disable_pingback_notify'] : 0),
-    'pingback_notify_email'=> $_POST['pingback_notify_email']
-    ///
-  );
-  if (empty($options['cronjob_interval'])) {
-    $options['cronjob_enable'] = 0;
-  }
-  /*if ($options['cronjob_enable'] && !$this->get_plugin_option('cronjob_enable')) {
-    $this->init_scheduled_hook();
-  } else if (!$options['cronjob_enable'] && $this->get_plugin_option('cronjob_enable')) {
-    $this->clear_scheduled_hook();
-  }*/
-  $this->set_plugin_options($options); ?>
-  <div id="message" class="updated fade">
-  <p>
-  <strong>
-  <?php _e('Settings saved.') ?>
-  </strong>
-  </p>
-  </div>
-  <?php } ?>
-  <div class="wrap">
-  <?php if ($this->is_min_wp('2.7')) { ?>
-  <div id="icon-options-general" class="icon32"><br /></div>
-  <?php } ?>
-  <h2>FV Antispam</h2>
-  <form method="post" action="">
-    <?php wp_nonce_field('antispam_bee') ?>
-    <div id="poststuff" class="ui-sortable">
-    <div class="postbox">
-    <h3>
-    <?php _e('Settings') ?>
-    </h3>
-    <div class="inside">
-      <!--<table class="form-table">
-        <tr>
-          <td>
-            <label for="antispam_bee_flag_spam">
-            <input type="checkbox" name="antispam_bee_flag_spam" id="antispam_bee_flag_spam" value="1" <?php checked($this->get_plugin_option('flag_spam'), 1) ?> />
-            <?php _e('Mark as Spam, do not delete', 'antispam_bee') ?> <?php $this->show_help_link('flag_spam') ?>
-            </label>
-          </td>
-        </tr>
-        <tr>
-          <td class="shift">
-            <input type="checkbox" name="antispam_bee_ignore_filter" id="antispam_bee_ignore_filter" value="1" <?php checked($this->get_plugin_option('ignore_filter'), 1) ?> />
-            <?php _e('Limit on', 'antispam_bee') ?> <select name="antispam_bee_ignore_type"><?php foreach(array(1 => __('Comments'), 2 => __('Pings')) as $key => $value) {
-            echo '<option value="' .$key. '" ';
-            selected($this->get_plugin_option('ignore_type'), $key);
-            echo '>' .$value. '</option>';
-            } ?>
-            </select> <?php $this->show_help_link('ignore_filter') ?>
-          </td>
-        </tr>
-        <tr>
-          <td class="shift">
-            <input type="checkbox" name="antispam_bee_cronjob_enable" id="antispam_bee_cronjob_enable" value="1" <?php checked($this->get_plugin_option('cronjob_enable'), 1) ?> />
-            <?php echo sprintf(__('Spam will be automatically deleted after %s days', 'antispam_bee'), '<input type="text" name="antispam_bee_cronjob_interval" value="' .$this->get_plugin_option('cronjob_interval'). '" class="small-text" />') ?>&nbsp;<?php $this->show_help_link('cronjob_enable') ?>
-            <?php echo ($this->get_plugin_option('cronjob_timestamp') ? ('&nbsp;<span class="setting-description">(' .__('Last', 'antispam_bee'). ': '. date_i18n('d.m.Y H:i:s', $this->get_plugin_option('cronjob_timestamp')). ')</span>') : '') ?>
-          </td>
-        </tr>
-        <tr>
-          <td class="shift">
-            <label for="antispam_bee_no_notice">
-            <input type="checkbox" name="antispam_bee_no_notice" id="antispam_bee_no_notice" value="1" <?php checked($this->get_plugin_option('no_notice'), 1) ?> />
-            <?php _e('Hide the &quot;MARKED AS SPAM&quot; note', 'antispam_bee') ?> <?php $this->show_help_link('no_notice') ?>
-            </label>
-          </td>
-        </tr>
-        <tr>
-          <td class="shift">
-            <label for="antispam_bee_email_notify">
-            <input type="checkbox" name="antispam_bee_email_notify" id="antispam_bee_email_notify" value="1" <?php checked($this->get_plugin_option('email_notify'), 1) ?> />
-            <?php _e('Send an admin email when new spam item incoming', 'antispam_bee') ?> <?php $this->show_help_link('email_notify') ?>
-            </label>
-          </td>
-        </tr>
-      </table>-->
-      <table class="form-table">
-        <tr>
-          <td>
-            <label for="antispam_bee_ignore_pings">
-            <input type="checkbox" name="antispam_bee_ignore_pings" id="antispam_bee_ignore_pings" value="1" <?php checked($this->get_plugin_option('ignore_pings'), 1) ?> />
-            <?php _e('Do not check trackbacks / pingbacks', 'antispam_bee') ?> <?php $this->show_help_link('ignore_pings') ?>
-            </label>
-          </td>
-        </tr>
-        <?php if ($this->is_min_wp('2.7')) { ?>
-          <!--<tr>
-            <td>
-              <label for="antispam_bee_dashboard_count">
-              <input type="checkbox" name="antispam_bee_dashboard_count" id="antispam_bee_dashboard_count" value="1" <?php checked($this->get_plugin_option('dashboard_count'), 1) ?> />
-              <?php _e('Display blocked comments count on the dashboard', 'antispam_bee') ?> <?php $this->show_help_link('dashboard_count') ?>
-              </label>
-            </td>
-          </tr>-->
-        <?php } ?>
-        <!--<tr>
-          <td>
-            <label for="antispam_bee_advanced_check">
-            <input type="checkbox" name="antispam_bee_advanced_check" id="antispam_bee_advanced_check" value="1" <?php checked($this->get_plugin_option('advanced_check'), 1) ?> />
-            <?php _e('Enable stricter inspection for incomming comments', 'antispam_bee') ?> <?php $this->show_help_link('advanced_check') ?>
-            </label>
-          </td>
-        </tr>-->
-        <!--<tr>
-          <td>
-            <label for="antispam_bee_already_commented">
-            <input type="checkbox" name="antispam_bee_already_commented" id="antispam_bee_already_commented" value="1" <?php checked($this->get_plugin_option('already_commented'), 1) ?> />
-            <?php _e('Do not check for spam if the author has already commented and approved', 'antispam_bee') ?> <?php $this->show_help_link('already_commented') ?>
-            </label>
-          </td>
-        </tr>-->
-        <!--<tr>
-          <td>
-            <label for="antispam_bee_always_allowed">
-            <input type="checkbox" name="antispam_bee_always_allowed" id="antispam_bee_always_allowed" value="1" <?php checked($this->get_plugin_option('always_allowed'), 1) ?> />
-            <?php _e('Comments are also used outside of posts and pages', 'antispam_bee') ?> <?php $this->show_help_link('always_allowed') ?>
-            </label>
-          </td>
-        </tr>-->
-        <tr>
-          <td>
-            <label for="my_own_styling">
-            <input type="checkbox" name="my_own_styling" id="my_own_styling" value="1" <?php checked($this->get_plugin_option('my_own_styling'), 1) ?> />
-            <?php _e('I\'ll put in my own styling', 'antispam_bee') ?> <?php $this->show_help_link('my_own_styling') ?>
-            </label>
-          </td>
-        </tr>
-        <tr>
-          <td>
-            <label for="trash_banned">
-            <input type="checkbox" name="trash_banned" id="trash_banned" value="1" <?php checked($this->get_plugin_option('trash_banned'), 1) ?> />
-            <?php _e('Trash banned (blacklisted) comments, don\'t just mark them as spam', 'antispam_bee') ?> <?php $this->show_help_link('trash_banned') ?>
-            </label>
-          </td>
-        </tr>
-        <tr>
-          <td>
-            <div class="postbox">
-              <h3>Pingback/trackback notification tweaks</h3>
-              <div class="inside">
-                <table class="form-table">
-                  <tr>
-                    <td>
-                    Enter alternative email address for pingback and trackback notifications<br />
-                      <label for="pingback_notify_email">
-                      <input type="text" class="regular-text" name="pingback_notify_email" id="pingback_notify_email" value="<?php if( function_exists( 'esc_attr' ) ) echo esc_attr( $this->get_plugin_option('pingback_notify_email') ); else echo ( $this->get_plugin_option('pingback_notify_email') ); ?>" />
-                      <span class="description"><?php _e('Leave empty if you want to use the default address from General Settings', 'antispam_bee') ?> <?php $this->show_help_link('disable_pingback_notify') ?></span>
-                      </label>
-                    </td>
-                  </tr>
-                  <tr>
-                    <td>
-                    Or<br />
-                      <label for="disable_pingback_notify">
-                      <input type="checkbox" name="disable_pingback_notify" id="disable_pingback_notify" value="1" <?php checked($this->get_plugin_option('disable_pingback_notify'), 1) ?> />
-                      <?php _e('Disable notifications for pingbacks and trackbacks', 'antispam_bee') ?> <?php $this->show_help_link('disable_pingback_notify') ?>
-                      </label>
-                    </td>
-                  </tr>           
-                </table>
-              </div>
-            </div>
-          </td>
-        </tr>
-      </table>
-      <p>
-      <input type="submit" name="antispam_bee_submit" class="button-primary" value="<?php _e('Save Changes') ?>" />
-      </p>
-    </div>
-    </div>
-    </div>
-  </form>
-  </div>
-  <?php }
+ 
+ 
 }
+
 $GLOBALS['FV_Antispam'] = new FV_Antispam();
 
 
+/*
+Extra
+*/
 if ( !function_exists('wp_notify_moderator') && ( $GLOBALS['FV_Antispam']->get_plugin_option('disable_pingback_notify') || $GLOBALS['FV_Antispam']->get_plugin_option('pingback_notify_email') ) ) :
 /**
  * wp_notify_moderator function modified to skip notifications for trackback and pingback type comments

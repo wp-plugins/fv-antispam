@@ -2,19 +2,18 @@
 Contributors: FolioVision
 Tags: antispam, spam, akismet
 Requires at least: 2.9
-Tested up to: 3.0.1
+Tested up to: 3.0.4
 Stable tag: trunk
 
-FV Antispam is a powerful and simple antispam plugin with no extra CPU load. All spambot comments go directly to trash, allowing Akismet to just deal with human spam.
+FV Antispam is a powerful and simple antispam plugin. It moves any spambot comments directly to trash and allows Akismet to just deal with human spam.
 
 == Description ==
 FV Antispam is a powerful and simple antispam plugin. FV Antispam moves any spambot (machine written) comments directly to the trash and allows Akismet to just deal with human spam.
-
-What makes FV Antispam better than any other solution is the very low CPU load. FV Antispam will not burden your hosting or slow down your server. Other effective antispam plugins may get your hosting cancelled. Really. It happened to us with WP SpamFree, that's why we wrote FV Antispam.
+What makes FV Antispam better than any other solution is the very low CPU load. FV Antispam will not burden your hosting or slow down your server. Other effective antispam plugins may get your hosting cancelled. Really. It happened to us, that's why we wrote FV Antispam.
 
 = The Problem =
 
-Our studies on our own sites have shown that for every 50 human spam comments a popular weblog will have up to 10,000 machine generated spam. With FV Antispam, Akismet finally becomes a useful tool again allowing you to browse your spam folder and pull out any Akismet false positives. If you use just Akismet, bots fill your whole spam folder with thousands of comments. It's nearly an impossible task to browse through hundreds or thousands of comments to find one or two false positives.
+Our studies on our own sites have shown that for every 50 human spam comments a popular weblog will have up to 10,000 machine generated spam. With FV Antispam, Akismet finally becomes a usefull tool again allowing you to browse your spam folder and pull out any Akismet false positives. If you use just Akismet, bots fill your whole spam folder with thousands of comments. It's nearly an impossible task to browse through hundreds or thousands of comments to find one or two false positives.
 
 = Why choose FV AntiSpam? =
 
@@ -22,11 +21,11 @@ Our studies on our own sites have shown that for every 50 human spam comments a 
 * Effective.
 * Reliable.
 * Zero false positives.
-* No additional CPU server load (unlike WP SpamFree for instance)
+* Virtually no CPU server load.
 
 = How does FV AntiSpam work so well? =
 
-* No detectable signature for spam bots (unlike the NoSpamNX author, we believe zero profile is important for long term success)
+* No detectable signature for spam bots
 * Blacklisted comments are put into trash
 * The spam is moved directly to trash
 * Works hand in hand with Akismet, not trying to replace the collective system but supplement it.
@@ -37,6 +36,12 @@ Our studies on our own sites have shown that for every 50 human spam comments a 
 [Support and more information](http://foliovision.com/seo-tools/wordpress/plugins/fv-antispam)
 
 == Changelog ==
+
+= 1.8.3 = 
+
+* New function - protect Filled in forms against spam
+* New function - display comments by default when you enter Comments section in wp-admin Dashboard
+* New function - show counts of comments and pingbacks separately in Comments section in wp-admin Dashboard
 
 = 1.8.2 = 
 
@@ -53,7 +58,8 @@ Our studies on our own sites have shown that for every 50 human spam comments a 
 
 == Screenshots ==
 
-1. FV Antispam Bee settings
+1. FV Antispam settings
+2. Enhanced comments and pingback counters (showing comments/pingbacks)
 
 == Installation ==
 
@@ -62,10 +68,6 @@ manually.
 
 == Frequently Asked Questions ==
 
-= All of my messages are recognized as spam, what could be the issue? =
-
-Please make sure that your host uses an up to date version of PCRE library. Version 7.9 2009-04-11 should be enough. Also check the pcre.backtrack_limit value, 100000 seems to be a good standard value on most hosts.
-
 = Why do you put the detected spam messages into trash? =
 
 This way your spam folder is not overwhelmed with all the obvious spam messages. So you can look at this folder to check the spam messages detected by Akismet for example. And with new Wordpress versions, you can also check the trash folder, to make sure that our plugin works correctly and only deletes what's really a spam.
@@ -73,3 +75,7 @@ This way your spam folder is not overwhelmed with all the obvious spam messages.
 = Why are you putting blacklisted comments into trash? =
 
 Same reason as above question, if a comments is already blacklisted, you don't want to think about it in spam folder.
+
+= I have a problem with my Filled in forms and I suspect it's caused by your plugin =
+
+When you are logged in you should see a notice above each protected Filled in form. You will also see a warning in wp-admin Dashboard if there is any conflict with your Filled in forms.
