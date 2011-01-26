@@ -30,7 +30,11 @@ class FV_Antispam {
       /*
       2011/01/14 - let's hide pings on the WP-admin -> Comments screen by default!
       */
-      add_action( 'in_admin_header', array( $this, 'in_admin_header' ) );
+      if ($this->is_min_wp('3.0') ) {
+        add_action( 'in_admin_header', array( $this, 'in_admin_header' ) );
+      } else {
+        add_action( 'admin_head', array( $this, 'in_admin_header' ) );
+      }
       
       /*
       Let's also play with the numbers a bit!
