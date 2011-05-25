@@ -469,7 +469,7 @@ class FV_Antispam {
         //$css .= '.'.$class.' { display: none; } ';
       }
       if( $id != '' ) {
-        $css .= '#'.$id.' { display: none; } ';
+        $css .= '#'.$id.' { display: none !important; } ';
       }
       
       $css = '<style>'.$css.'</style>';
@@ -778,16 +778,27 @@ class FV_Antispam {
   
   
   function show_dashboard_count() {
-    echo sprintf(
-    '<tr>
-    <!--<td class="first b b-tags"></td>
-    <td class="t tags"></td>-->
-    <td class="b b-spam" style="font-size:18px">%s</td>
-    <td class="last t">%s</td>
-    </tr>',
-    $this->get_spam_count(),
-    __('Blocked', 'antispam_bee')
-    );
+    if( $this->is_min_wp( '3.0' ) ) {
+      echo sprintf(
+      '<tr>
+      <td class="b b-spam" style="font-size:18px">%s</td>
+      <td class="last t">%s</td>
+      </tr>',
+      $this->get_spam_count(),
+      __('Blocked (<abbr title="Number of spam comments blocked by FV Antispam">?</a>)', 'antispam_bee')
+      );
+    } else {
+      echo sprintf(
+      '<tr>
+      <td class="first b b-tags"></td>
+      <td class="t tags"></td>
+      <td class="b b-spam" style="font-size:18px">%s</td>
+      <td class="last t">%s</td>
+      </tr>',
+      $this->get_spam_count(),
+      __('Blocked (<abbr title="Number of spam comments blocked by FV Antispam">?</a>)', 'antispam_bee')
+      );
+    }
   }
   
   
