@@ -4,7 +4,7 @@ Plugin Name: FV Antispam
 Plugin URI: http://foliovision.com/seo-tools/wordpress/plugins/fv-antispam
 Description: Powerful and simple antispam plugin. Puts all the spambot comments directly into trash and let's other plugins (Akismet) deal with the rest.
 Author: Foliovision
-Version: 1.8.3
+Version: 1.8.3.1
 Author URI: http://www.foliovision.com
 */
 
@@ -39,7 +39,7 @@ class FV_Antispam {
       /*
       Let's also play with the numbers a bit!
       */
-      add_action( 'comment_status_links', array( $this, 'comment_status_links' ) );
+      //add_action( 'comment_status_links', array( $this, 'comment_status_links' ) ); //  disabled, not working well, todo
 
       add_action( 'init', array( $this, 'load_plugin_lang' ) );
       add_action( 'init', array( $this, 'save_options' ) );
@@ -67,7 +67,7 @@ class FV_Antispam {
       ///
       add_action( 'comment_post', array( $this, 'fv_blacklist_to_trash_post' ), 1000 ); //  all you need
       ///
-      add_action( 'template_redirect', array( $this, 'replace_comment_field' ) );
+      add_action( 'template_redirect', array( $this, 'replace_comment_field' ), 0 );  //  top priority
       add_action( 'init', array( $this, 'precheck_comment_request' ), 0 );
       add_action( 'preprocess_comment', array( $this, 'verify_comment_request' ), 1 );
       add_action( 'antispam_bee_count', array( $this, 'the_spam_count' ) );
@@ -780,8 +780,8 @@ class FV_Antispam {
   function show_dashboard_count() {
     echo sprintf(
     '<tr>
-    <td class="first b b-tags"></td>
-    <td class="t tags"></td>
+    <!--<td class="first b b-tags"></td>
+    <td class="t tags"></td>-->
     <td class="b b-spam" style="font-size:18px">%s</td>
     <td class="last t">%s</td>
     </tr>',
@@ -797,7 +797,7 @@ class FV_Antispam {
   
   function show_plugin_notices() {
     echo sprintf(
-    '<div class="error"><p><strong>Antispam Bee</strong> %s</p></div>',
+    '<div class="error"><p><strong>FV Antispam</strong> %s</p></div>',
     __('requires at least WordPress 2.3', 'antispam_bee')
     );
   }
