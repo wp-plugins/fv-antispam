@@ -194,6 +194,17 @@ class FV_Antispam {
     if( !$this->get_plugin_option('protect_filledin') ) {
       return;
     }
+    
+    $active_plugins = get_option('active_plugins');var_dump( $active_plugins );
+    foreach( $active_plugins AS $active_plugins_item ) {
+      if( stripos( $active_plugins_item, 'filled_in.php' ) !== FALSE ) {
+        $found_filled_in = true;
+      }
+    }
+    if( !$found_filled_in ) {
+      return;
+    }
+    
     global $wpdb;
     $forms = $wpdb->get_col( "SELECT name FROM {$wpdb->prefix}filled_in_forms" );
     

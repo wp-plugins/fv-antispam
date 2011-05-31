@@ -41,6 +41,7 @@ Our studies on our own sites have shown that for every 50 human spam comments a 
 
 * Admin interface display issues fix
 * The Events Calendar bugfix (comment forms were not working on events)
+* Bugfix in Filled in collision detection
 
 = 1.8.3 = 
 
