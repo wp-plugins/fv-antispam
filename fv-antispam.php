@@ -195,7 +195,7 @@ class FV_Antispam {
       return;
     }
     
-    $active_plugins = get_option('active_plugins');var_dump( $active_plugins );
+    $active_plugins = get_option('active_plugins');
     foreach( $active_plugins AS $active_plugins_item ) {
       if( stripos( $active_plugins_item, 'filled_in.php' ) !== FALSE ) {
         $found_filled_in = true;
