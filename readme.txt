@@ -91,3 +91,7 @@ When you are logged in you should see a notice above each protected Filled in fo
 [Live Comment Preview](http://wordpress.org/extend/plugins/live-comment-preview/) works, but you have to change the textarea ID in the live-comment-preview.php file on line 124. You can find out that the ID is by looking into the source code of the page with comment form on it. It will be an unique string of seemingly random numbers and letters like “a7391152e”, so use that.
 
 [jQuery Comment Preview](http://dimox.net/jquery-comment-preview-wordpress-plugin/) is not so lightweight as the Live Comment Preview, but you can set the ID in options, so you don’t have to edit files.
+
+= I'm seeing two comment textareas with this plugin! =
+
+Please check your template HTML and CSS for that element. Ideally it should use standard WP [comment_form](http://codex.wordpress.org/Function_Reference/comment_form) function and the same kind of CSS as the default template (TwentyTen).
