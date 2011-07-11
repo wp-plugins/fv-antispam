@@ -94,4 +94,4 @@ When you are logged in you should see a notice above each protected Filled in fo
 
 = I'm seeing two comment textareas with this plugin! =
 
-Please check your template HTML and CSS for that element. Ideally it should use standard WP [comment_form](http://codex.wordpress.org/Function_Reference/comment_form) function and the same kind of CSS as the default template (TwentyTen).
+Please check your template HTML and CSS for that element. Ideally it should use standard WP [comment_form](http://codex.wordpress.org/Function_Reference/comment_form) function and the same kind of CSS as the default template (TwentyTen). It needs to have id="comment".
