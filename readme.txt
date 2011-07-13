@@ -72,6 +72,8 @@ Our studies on our own sites have shown that for every 50 human spam comments a 
 You can use the built in installer and upgrader, or you can install the plugin
 manually.
 
+**Test** comment submission as non-logged in user after the plugin is installed! Read the [FV Antispam Testing guide](http://foliovision.com/seo-tools/wordpress/plugins/fv-antispam/installation)!
+
 == Frequently Asked Questions ==
 
 = Why do you put the detected spam messages into trash? =
