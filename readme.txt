@@ -100,4 +100,4 @@ Please check your template HTML and CSS for that element. Ideally it should use 
 
 = All the comments go into trash! =
 
-Same as above - make sure you use standard WP functions for display of comment forms.
+Same as above - make sure you use standard WP functions for display of comment forms. When you check out HTML source of your article page with comments bellow it, you should see two textareas - one with ID comment and the other with ID consisting of random numbers and letters. The first one should be set to invisible by this plugin.
