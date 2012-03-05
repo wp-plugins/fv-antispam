@@ -2,7 +2,7 @@
 Contributors: FolioVision
 Tags: antispam, spam, akismet
 Requires at least: 2.9
-Tested up to: 3.3
+Tested up to: 3.3.1
 Stable tag: trunk
 
 FV Antispam is a powerful and simple antispam plugin. It moves any spambot comments directly to trash and allows Akismet to just deal with human spam.
@@ -36,6 +36,12 @@ Our studies on our own sites have shown that for every 50 human spam comments a 
 [Support and more information](http://foliovision.com/seo-tools/wordpress/plugins/fv-antispam)
 
 == Changelog ==
+
+= 1.8.4 =
+
+* Added protection for WP registration form
+* Added removing of trash comments older than 1 month
+* Added option to hide trackbacks in Comments in admin section
 
 = 1.8.3.1 = 
 

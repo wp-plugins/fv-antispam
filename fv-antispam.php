@@ -4,10 +4,9 @@ Plugin Name: FV Antispam
 Plugin URI: http://foliovision.com/seo-tools/wordpress/plugins/fv-antispam
 Description: Powerful and simple antispam plugin. Puts all the spambot comments directly into trash and let's other plugins (Akismet) deal with the rest.
 Author: Foliovision
-Version: 1.8.3.1
+Version: 1.8.4
 Author URI: http://www.foliovision.com
 */
-
 
 if (!function_exists ('is_admin')) {
   header('Status: 403 Forbidden');
@@ -27,24 +26,11 @@ class FV_Antispam {
     ///
     $this->locale = get_locale();
     if (is_admin()) {
-      /*
-      2011/01/14 - let's hide pings on the WP-admin -> Comments screen by default!
-      */
-      if ($this->is_min_wp('3.0') ) {
-        add_action( 'in_admin_header', array( $this, 'in_admin_header' ) );
-      } else {
-        add_action( 'admin_head', array( $this, 'in_admin_header' ) );
-      }
-      
-      /*
-      Let's also play with the numbers a bit!
-      */
-      //add_action( 'comment_status_links', array( $this, 'comment_status_links' ) ); //  disabled, not working well, todo
 
+      
       add_action( 'init', array( $this, 'load_plugin_lang' ) );
-      add_action( 'init', array( $this, 'save_options' ) );
       add_action( 'admin_menu', array( $this, 'init_admin_menu' ) );
-      add_action( 'admin_notices', array( &$this, 'filled_in_collision_check') );
+
       if ($this->is_current_page('home')) {
         add_action( 'admin_head', array( $this, 'show_plugin_head' ) );
       } else if ($this->is_current_page('index')) {
@@ -52,22 +38,27 @@ class FV_Antispam {
           add_action( 'right_now_table_end', array( $this, 'show_dashboard_count' ) );
         }
       } else if ($this->is_current_page('plugins')) {
-        /*deleteif (!$this->is_min_wp('2.3')) {
-          add_action( 'admin_notices', array( $this, 'show_plugin_notices' ) );
-        }*/
         add_action( 'activate_' .$this->basename, array( $this, 'init_plugin_options' ) );
-        //add_action( 'deactivate_' .$this->basename, array( $this, 'clear_scheduled_hook' ) );
+        add_action( 'deactivate_' .$this->basename, array( $this, 'clear_scheduled_hook' ) );
         if ($this->is_min_wp('2.8')) {
           add_filter( 'plugin_row_meta', array( $this, 'init_row_meta' ), 10, 2 );
         } else {
           add_filter( 'plugin_action_links', array( $this, 'init_action_links' ), 10, 2 );
         }
       }
+      
+      if( $this->get_plugin_option('comment_status_links') ) {
+        $this->in_admin_header();
+        add_action( 'comment_status_links', array( $this, 'comment_status_links' ) );
+      }      
+      
+      add_action( 'init', array( $this, 'InitiateCron' ) );
+      
     } else {
       ///
       add_action( 'comment_post', array( $this, 'fv_blacklist_to_trash_post' ), 1000 ); //  all you need
       ///
-      add_action( 'template_redirect', array( $this, 'replace_comment_field' ), 0 );  //  top priority
+      add_action( 'template_redirect', array( $this, 'replace_comment_field' ) );
       add_action( 'init', array( $this, 'precheck_comment_request' ), 0 );
       add_action( 'preprocess_comment', array( $this, 'verify_comment_request' ), 1 );
       add_action( 'antispam_bee_count', array( $this, 'the_spam_count' ) );
@@ -81,10 +72,16 @@ class FV_Antispam {
   		}
   		///
       
-      /*if ($this->get_plugin_option('cronjob_enable')) {
-        add_action( 'antispam_bee_daily_cronjob', array( $this, 'exe_daily_cronjob' ) );
-      }*/
+      if ($GLOBALS['pagenow'] == 'wp-login.php' && $this->get_plugin_option('spam_registrations')) {
+        add_action( 'login_head', array( $this, 'protect_spam_registrations_style' ) );            
+        add_action( 'init', array( $this, 'replace_email_registration_field_start' ) );
+        add_action( 'register_form', array( $this, 'replace_email_registration_field_flush' ) );
+        add_action( 'login_form', array( $this, 'replace_message_field_flush' ) );
+        add_action( 'init', array( $this, 'protect_spam_registrations_check' ), 0 );
+      }
     }
+    
+    add_action( 'fv_clean_trash_hourly', array( $this, 'clean_comments_trash' ) );
   }
   
   
@@ -97,13 +94,13 @@ class FV_Antispam {
   }*/
   
   
-  /*function clear_scheduled_hook() {
+  function clear_scheduled_hook() {
     if (function_exists('wp_schedule_event')) {
-      if (wp_next_scheduled('antispam_bee_daily_cronjob')) {
-        wp_clear_scheduled_hook('antispam_bee_daily_cronjob');
+      if (wp_next_scheduled('fv_clean_trash_hourly')) {
+        wp_clear_scheduled_hook('fv_clean_trash_hourly');
       }
     }
-  }*/
+  }
   
   
   function check_user_can() {
@@ -136,14 +133,25 @@ class FV_Antispam {
         if( $count_item->comment_type == '' ) $count_types[$count_item->comment_approved]['comments'] = $count_item->num_comments;
         else $count_types[$count_item->comment_approved]['pings'] += $count_item->num_comments;
       }
-  
-      foreach( array( 'moderated' => 0, 'spam' => 'spam', 'trash' => 'trash' ) AS $key => $value ) {
-        $new_count = number_format( intval( $count_types[$value]['comments'] ) ).'/'.number_format( intval( $count_types[$value]['pings'] ) );
-        $content = preg_replace( '@(<li class=\''.$key.'\'>.*?<span class="count">\(<span class="\S+-count">)[\d,]+@', '$1&shy;'.$new_count, $content );
 
+      if( $this->is_min_wp( '3.1' ) ) {
+        foreach( $content AS $content_key => $content_item ) {
+        	if( $content_key == 'moderated' ) {
+        		$content_key_select = '0';
+        	} else {
+        		$content_key_select = $content_key;
+        	}
+          $new_count = number_format( intval( $count_types[$content_key_select]['comments'] ) ).'</span>/'.number_format( intval( $count_types[$content_key_select]['pings'] ) );
+          $content[$content_key] = preg_replace( '@(<span class="count">\(<span class="\S+-count">)[\d,]+</span>@', '$1&shy;'.$new_count, $content[$content_key] );
+        }
+      } else {
+        foreach( array( 'moderated' => 0, 'spam' => 'spam', 'trash' => 'trash' ) AS $key => $value ) {
+          $new_count = number_format( intval( $count_types[$value]['comments'] ) ).'/'.number_format( intval( $count_types[$value]['pings'] ) );
+          $content = preg_replace( '@(<li class=\''.$key.'\'>.*?<span class="count">\(<span class="\S+-count">)[\d,]+@', '$1&shy;'.$new_count, $content );  
+        }
       }
     }
-    $content[] = '<li class="help"><abbr title="The numbers show counts of comments/pings for each group.">(?)</abbr></li>';
+    $content['help'] = '<abbr title="The numbers show counts of comments/pings for each group.">(?)</abbr>';
     return $content; 
   }
   
@@ -190,50 +198,48 @@ class FV_Antispam {
     * @global object WPDB.               
     * 
     */    
-  function filled_in_collision_check() {
-    if( !$this->get_plugin_option('protect_filledin') ) {
-      return;
-    }
+  function filled_in_collision_check( $force = false ) {
+    if( stripos( $_SERVER['REQUEST_URI'], 'fv-antispam.php' ) && !$force ) return;
     
-    $active_plugins = get_option('active_plugins');
-    foreach( $active_plugins AS $active_plugins_item ) {
-      if( stripos( $active_plugins_item, 'filled_in.php' ) !== FALSE ) {
-        $found_filled_in = true;
-      }
-    }
-    if( !$found_filled_in ) {
-      return;
-    }
-    
-    global $wpdb;
-    $forms = $wpdb->get_col( "SELECT name FROM {$wpdb->prefix}filled_in_forms" );
-    
-    if( $forms ) {
-      $where = array();
-      foreach( $forms AS $forms_item ) {
-        $where[] = '( post_content LIKE \'%id="'.$forms_item.'"%\' AND post_status = \'publish\' )';
-      }
-      $where = implode( ' OR ', $where );
-      $posts = $wpdb->get_results( "SELECT ID,post_title,post_content FROM $wpdb->posts WHERE {$where} ORDER BY post_date DESC" );
-      if( $posts ) {
-        $problems = array();
-        foreach( $posts AS $posts_item ) {
-          foreach( $forms AS $forms_item ) {
-            $res = preg_match_all( '@<form.*?id=[\'"]'.$forms_item.'[\'"].*?name=[\'"]'.$this->get_filled_in_fake_field_name().'[\'"].*?</form>@si', $posts_item->post_content, $matches );
-            if( $res ) {
-              $problems[] = array( 'post_id' => $posts_item->ID, 'post_title' => $posts_item->post_title, 'form_name' => $forms_item );
-            } 
-          }
+    $problems = get_option( 'fv_antispam_filledin_conflict' );
+    if( $problems === false ) {
+      global $wpdb;
+      
+      $forms = $wpdb->get_col( "SELECT name FROM {$wpdb->prefix}filled_in_forms" );
+      
+      if( $forms ) {
+        $where = array();
+        foreach( $forms AS $forms_item ) {
+          $where[] = '( post_content LIKE \'%id="'.$forms_item.'"%\' AND post_status = \'publish\' )';
         }
-        if( $problems ) {
-          $problematic_message = '';
-          foreach( $problems AS $key=>$problems_item ) {
-            $problematic_message .= ' <a title="Post \''.$problems_item['post_title'].'\' containing form \''.$problems_item['form_name'].'\'" href="'.get_bloginfo( 'url' ).'?p='.$problems_item['post_id'].'">'.$problems_item['post_id'].'</a>';
+        $where = implode( ' OR ', $where );
+        $posts = $wpdb->get_results( "SELECT ID,post_title,post_content FROM $wpdb->posts WHERE {$where} ORDER BY post_date DESC" );
+        if( $posts ) {
+          $problems = array();
+          foreach( $posts AS $posts_item ) {
+            foreach( $forms AS $forms_item ) {
+              $res = preg_match_all( '@<form.*?id=[\'"]'.$forms_item.'[\'"].*?name=[\'"]'.$this->get_filled_in_fake_field_name().'[\'"].*?</form>@si', $posts_item->post_content, $matches );
+              if( $res ) {
+                $problems[] = array( 'post_id' => $posts_item->ID, 'post_title' => $posts_item->post_title, 'form_name' => $forms_item );
+              } 
+            }
           }
-          echo '<div class="error fade"><p>FV Antispam detected that following posts contain Filled in forms that conflict with FV Antispam fake field name:'.$problematic_message.'. Please set a different fake field name <a href="'.get_bloginfo( 'wpurl' ).'/wp-admin/options-general.php?page=fv-antispam/fv-antispam.php">here</a>. <a href="http://foliovision.com/seo-tools/wordpress/plugins/fv-antispam/filled-in-protection">Read more</a> about this issue.</p></div>'; 
+          if( $problems ) {
+            update_option( 'fv_antispam_filledin_conflict', $problems );
+          } else {
+            update_option( 'fv_antispam_filledin_conflict', array( ) );
+          }
+           
         }
-         
       }
+    }
+    if( $problems ) {
+      $problematic_message = '';
+      foreach( $problems AS $key=>$problems_item ) {
+        $problematic_message .= ' <a title="Post \''.$problems_item['post_title'].'\' containing form \''.$problems_item['form_name'].'\'" href="'.get_bloginfo( 'url' ).'?p='.$problems_item['post_id'].'">'.$problems_item['post_id'].'</a>';
+      }
+      echo '<div class="error fade"><p>FV Antispam detected that following posts contain Filled in forms that conflict with FV Antispam fake field name:'.$problematic_message.'. Please set a different fake field name <a href="'.get_bloginfo( 'wpurl' ).'/wp-admin/options-general.php?page=fv-antispam/fv-antispam.php">here</a>. <a href="http://foliovision.com/seo-tools/wordpress/plugins/fv-antispam/filled-in-protection">Read more</a> about this issue.</p></div>'; 
+
     }
   }
   
@@ -346,11 +352,7 @@ class FV_Antispam {
   
   
   function init_plugin_options() {
-    add_option( 'fv_antispam', array( 'trash_banned' => true, 'protect_filledin' => true ) );
-    /*$this->migrate_old_options();
-    if ($this->get_plugin_option('cronjob_enable')) {
-      $this->init_scheduled_hook();
-    }*/
+    add_option( 'fv_antispam', array( 'trash_banned' => true, 'protect_filledin' => true, 'spam_registrations' => true ) );
   }
   
   
@@ -448,11 +450,10 @@ class FV_Antispam {
       /*
       'return preg_replace("#<textarea(.*?)name=([\"\'])comment([\"\'])(.+?)</textarea>#s", "<textarea$1name=$2' .$this->protect. '$3$4</textarea><textarea name=\"comment\" rows=\"1\" cols=\"1\" style=\"display:none\"></textarea>", $input, 1);'*/
       /*'return preg_replace("#<textarea(.*?)name=([\"\'])comment([\"\'])(.+?)</textarea>#s", "<textarea$1name=$2' .$this->protect($post->ID). '$3$4</textarea><textarea name=\"comment\" rows=\"1\" cols=\"1\" class=\"comment-field\"></textarea><style>.comment-field { display: none; }</style>", $input, 1);'*/
-      'return preg_replace_callback("#wp-comments-post.php\".*?(<textarea.*?(class=\".*?\")?.*?</textarea>)#s", "FV_Antispam::replace_textarea" , $input, 2);'
+      'return preg_replace_callback("#wp-comments-post.php\".*?(<textarea.*?(class=\".*?\")?.*?</textarea>)#s", "FV_Antispam::replace_textarea" , $input, 1);'
       )
     );
-  }
-  
+  }          
   
   /**
     * Callback which adds fake field.
@@ -464,7 +465,7 @@ class FV_Antispam {
     */    
   static function replace_textarea( $match ) {
     global $post;
-    
+
     preg_match( '/class=[\"\'](.*?)[\"\']/', $match[1], $class );
     preg_match( '/id=[\"\'](.*?)[\"\']/', $match[1], $id );
     preg_match( '/name=[\"\'](.*?)[\"\']/', $match[1], $name );
@@ -490,60 +491,9 @@ class FV_Antispam {
     $new = preg_replace( '/name=[\'"]'.$name.'[\'"]/i', 'name="'.FV_Antispam::protect($post->ID).'"', $new );
     $new = preg_replace( '/name=[\'"]'.$name.'[\'"]/i', 'name="'.FV_Antispam::protect($post->ID).'"', $new );
     
-    return $match[0].'<!-- </form> -->'.$new.$css;
-  }
-  
-  
-  function save_options() {
-    if ( $_POST['fv_antispam_submit'] ) {
-      check_admin_referer('fvantispam');
-      $options = array(
-        //'flag_spam'=> (isset($_POST['antispam_bee_flag_spam']) ? (int)$_POST['antispam_bee_flag_spam'] : 0),
-        'ignore_pings'=> (isset($_POST['antispam_bee_ignore_pings']) ? (int)$_POST['antispam_bee_ignore_pings'] : 0),
-        //'ignore_filter'=> (isset($_POST['antispam_bee_ignore_filter']) ? (int)$_POST['antispam_bee_ignore_filter'] : 0),
-        //'ignore_type'=> (isset($_POST['antispam_bee_ignore_type']) ? (int)$_POST['antispam_bee_ignore_type'] : 0),
-        //'no_notice'=> (isset($_POST['antispam_bee_no_notice']) ? (int)$_POST['antispam_bee_no_notice'] : 0),
-        //'email_notify'=> (isset($_POST['antispam_bee_email_notify']) ? (int)$_POST['antispam_bee_email_notify'] : 0),
-        //'cronjob_enable'=> (isset($_POST['antispam_bee_cronjob_enable']) ? (int)$_POST['antispam_bee_cronjob_enable'] : 0),
-        //'cronjob_interval'=> (isset($_POST['antispam_bee_cronjob_interval']) ? (int)$_POST['antispam_bee_cronjob_interval'] : 0),
-        //'dashboard_count'=> (isset($_POST['antispam_bee_dashboard_count']) ? (int)$_POST['antispam_bee_dashboard_count'] : 0),
-        //'advanced_check'=> (isset($_POST['antispam_bee_advanced_check']) ? (int)$_POST['antispam_bee_advanced_check'] : 0),
-        //'already_commented'=> (isset($_POST['antispam_bee_already_commented']) ? (int)$_POST['antispam_bee_already_commented'] : 0),
-        //'always_allowed'=> (isset($_POST['antispam_bee_always_allowed']) ? (int)$_POST['antispam_bee_always_allowed'] : 0),
-        ///
-        'my_own_styling'=> (isset($_POST['my_own_styling']) ? (int)$_POST['my_own_styling'] : 0),
-        'trash_banned'=> (isset($_POST['trash_banned']) ? (int)$_POST['trash_banned'] : 0),
-        'protect_filledin'=> (isset($_POST['protect_filledin']) ? (int)$_POST['protect_filledin'] : 0),
-        'protect_filledin_disable_notice'=> (isset($_POST['protect_filledin_disable_notice']) ? (int)$_POST['protect_filledin_disable_notice'] : 0),
-        'protect_filledin_field'=> $_POST['protect_filledin_field'],
-        'disable_pingback_notify'=> (isset($_POST['disable_pingback_notify']) ? (int)$_POST['disable_pingback_notify'] : 0),
-        'pingback_notify_email'=> $_POST['pingback_notify_email']
-        ///
-      );
-      if (empty($options['cronjob_interval'])) {
-        $options['cronjob_enable'] = 0;
-      }
-      /*if ($options['cronjob_enable'] && !$this->get_plugin_option('cronjob_enable')) {
-        $this->init_scheduled_hook();
-      } else if (!$options['cronjob_enable'] && $this->get_plugin_option('cronjob_enable')) {
-        $this->clear_scheduled_hook();
-      }*/
-      
-      
-      $this->set_plugin_options($options);
-      add_action( 'admin_notices', array( &$this, 'save_options_notice') );
-    }
-  }
-  
-  
-  function save_options_notice() {
-    ?>
-    <div id="message" class="updated fade">
-      <p>
-        <strong><?php _e('Settings saved.') ?></strong>
-      </p>
-    </div>
-    <?php
+    $output = $match[0].'<!-- </form> -->'.$new.$css;
+   
+    return $output;
   }
       
   
@@ -560,43 +510,58 @@ class FV_Antispam {
       return;
     }
     $options = array_merge( (array)get_option('fv_antispam'), $data );
+    delete_option( 'fv_antispam_filledin_conflict' );
     update_option( 'fv_antispam', $options );
     wp_cache_set( 'fv_antispam', $options );
   }
   
-  
-  /*function migrate_old_options() {
-    if (get_option('antispam_bee_cronjob_timestamp') === false) {
-      return;
-    }
-    $fields = array(
-      'flag_spam',
-      'ignore_pings',
-      'ignore_filter',
-      'ignore_type',
-      'no_notice',
-      'cronjob_enable',
-      'cronjob_interval',
-      'cronjob_timestamp',
-      'spam_count',
-      'dashboard_count'
-    );
-    foreach($fields as $field) {
-      $this->set_plugin_option( $field, get_option('antispam_bee_' .$field) );
-    }
-    $GLOBALS['wpdb']->query("DELETE FROM `" .$GLOBALS['wpdb']->options. "` WHERE option_name LIKE 'antispam_bee_%'");
-    $GLOBALS['wpdb']->query("OPTIMIZE TABLE `" .$GLOBALS['wpdb']->options. "`");
-  }*/
-
 
   function show_admin_menu() {
+	
     $this->check_user_can();
-    ?>
-
+    if (!empty($_POST)) {
+    
+    check_admin_referer('fvantispam');
+    $options = array(
+      //'flag_spam'=> (isset($_POST['antispam_bee_flag_spam']) ? (int)$_POST['antispam_bee_flag_spam'] : 0),
+      'spam_registrations'=> (isset($_POST['spam_registrations']) ? (int)$_POST['spam_registrations'] : 0),
+      'ignore_pings'=> (isset($_POST['antispam_bee_ignore_pings']) ? (int)$_POST['antispam_bee_ignore_pings'] : 0),
+      //'ignore_filter'=> (isset($_POST['antispam_bee_ignore_filter']) ? (int)$_POST['antispam_bee_ignore_filter'] : 0),
+      //'ignore_type'=> (isset($_POST['antispam_bee_ignore_type']) ? (int)$_POST['antispam_bee_ignore_type'] : 0),
+      //'no_notice'=> (isset($_POST['antispam_bee_no_notice']) ? (int)$_POST['antispam_bee_no_notice'] : 0),
+      //'email_notify'=> (isset($_POST['antispam_bee_email_notify']) ? (int)$_POST['antispam_bee_email_notify'] : 0),
+      'cronjob_enable'=> (isset($_POST['cronjob_enable']) ? (int)$_POST['cronjob_enable'] : 0),
+      //'cronjob_interval'=> (isset($_POST['antispam_bee_cronjob_interval']) ? (int)$_POST['antispam_bee_cronjob_interval'] : 0),
+      //'dashboard_count'=> (isset($_POST['antispam_bee_dashboard_count']) ? (int)$_POST['antispam_bee_dashboard_count'] : 0),
+      //'advanced_check'=> (isset($_POST['antispam_bee_advanced_check']) ? (int)$_POST['antispam_bee_advanced_check'] : 0),
+      //'already_commented'=> (isset($_POST['antispam_bee_already_commented']) ? (int)$_POST['antispam_bee_already_commented'] : 0),
+      //'always_allowed'=> (isset($_POST['antispam_bee_always_allowed']) ? (int)$_POST['antispam_bee_always_allowed'] : 0),
+      ///
+      'my_own_styling'=> (isset($_POST['my_own_styling']) ? (int)$_POST['my_own_styling'] : 0),
+      'trash_banned'=> (isset($_POST['trash_banned']) ? (int)$_POST['trash_banned'] : 0),
+      'protect_filledin'=> (isset($_POST['protect_filledin']) ? (int)$_POST['protect_filledin'] : 0),
+      'protect_filledin_disable_notice'=> (isset($_POST['protect_filledin_disable_notice']) ? (int)$_POST['protect_filledin_disable_notice'] : 0),
+      'protect_filledin_field'=> $_POST['protect_filledin_field'],
+      'disable_pingback_notify'=> (isset($_POST['disable_pingback_notify']) ? (int)$_POST['disable_pingback_notify'] : 0),
+      'pingback_notify_email'=> $_POST['pingback_notify_email'],
+      'comment_status_links'=> (isset($_POST['comment_status_links']) ? (int)$_POST['comment_status_links'] : 0)
+      ///
+    );
+    
+    $this->set_plugin_options($options); ?>
+    <div id="message" class="updated fade">
+    <p>
+    <strong>
+    <?php _e('Settings saved.') ?>
+    </strong>
+    </p>
+    </div>
+    <?php } ?>
     <div class="wrap">
     <?php if ($this->is_min_wp('2.7')) { ?>
     <div id="icon-options-general" class="icon32"><br /></div>
-    <?php } ?>
+    <?php }
+ ?>
     <h2>FV Antispam</h2>
     
     <form method="post" action="">
@@ -627,13 +592,7 @@ class FV_Antispam {
               </select> <?php $this->show_help_link('ignore_filter') ?>
             </td>
           </tr>
-          <tr>
-            <td class="shift">
-              <input type="checkbox" name="antispam_bee_cronjob_enable" id="antispam_bee_cronjob_enable" value="1" <?php checked($this->get_plugin_option('cronjob_enable'), 1) ?> />
-              <?php echo sprintf(__('Spam will be automatically deleted after %s days', 'antispam_bee'), '<input type="text" name="antispam_bee_cronjob_interval" value="' .$this->get_plugin_option('cronjob_interval'). '" class="small-text" />') ?>&nbsp;<?php $this->show_help_link('cronjob_enable') ?>
-              <?php echo ($this->get_plugin_option('cronjob_timestamp') ? ('&nbsp;<span class="setting-description">(' .__('Last', 'antispam_bee'). ': '. date_i18n('d.m.Y H:i:s', $this->get_plugin_option('cronjob_timestamp')). ')</span>') : '') ?>
-            </td>
-          </tr>
+
           <tr>
             <td class="shift">
               <label for="antispam_bee_no_notice">
@@ -698,7 +657,7 @@ class FV_Antispam {
             <td>
               <label for="my_own_styling">
               <input type="checkbox" name="my_own_styling" id="my_own_styling" value="1" <?php checked($this->get_plugin_option('my_own_styling'), 1) ?> />
-              <?php _e('I\'ll put in my own styling', 'antispam_bee') ?>
+              <?php _e('I\'ll put in my own styling', 'antispam_bee') ?><span class="description">(Make sure that #comment is hidden in your CSS!)</span>
               </label>
             </td>
           </tr>
@@ -710,6 +669,30 @@ class FV_Antispam {
               </label>
             </td>
           </tr>
+          <tr>
+            <td>
+              <label for="spam_registrations">
+              <input type="checkbox" name="spam_registrations" id="spam_registrations" value="1" <?php checked($this->get_plugin_option('spam_registrations'), 1) ?> />
+              <?php _e('Protect the registration form', 'antispam_bee') ?>
+              </label>
+            </td>
+          </tr>
+          <tr>
+            <td>
+              <label for="comment_status_links">
+              <input type="checkbox" name="comment_status_links" id="comment_status_links" value="1" <?php checked($this->get_plugin_option('comment_status_links'), 1) ?> />
+              <?php _e('Enhance Wordpress Admin Comments section', 'antispam_bee') ?> <span class="description">Hides trackbacks and shows separate counts for comments and trackbacks</span>
+              </label>
+            </td>
+          </tr>            
+          <tr>
+            <td>
+              <label for="cronjob_enable">
+              <input type="checkbox" name="cronjob_enable" id="cronjob_enable" value="1" <?php checked($this->get_plugin_option('cronjob_enable'), 1) ?> />
+              Remove trash comments older than 30 days
+              </label>
+            </td>
+          </tr>                  
           <tr>
             <td>
               <div class="postbox">
@@ -770,6 +753,21 @@ class FV_Antispam {
                         </label>
                       </td>
                     </tr>
+                    <tr>
+                      <td>
+                        <?php
+                        $problems = get_option( 'fv_antispam_filledin_conflict' );
+                        if( $problems ) {
+                          $this->filled_in_collision_check( true );
+                        }
+                        else if( $problems === false ) {
+                          $this->filled_in_collision_check( true );
+                        } else {
+                          ?>No conflicts with Filled In detected<?php
+                        }
+                        ?>
+                      </td>
+                    </tr>
                              
                   </table>
                 </div>
@@ -815,15 +813,7 @@ class FV_Antispam {
   
   function show_help_link($anchor) {
   }
-  
-  
-  function show_plugin_notices() {
-    echo sprintf(
-    '<div class="error"><p><strong>FV Antispam</strong> %s</p></div>',
-    __('requires at least WordPress 2.3', 'antispam_bee')
-    );
-  }
-  
+    
   
   function show_plugin_head() {
     wp_enqueue_script('jquery'); ?>
@@ -874,10 +864,17 @@ class FV_Antispam {
     foreach( $forms[0] AS $form ) {
       
       if( current_user_can('manage_options') && !$this->get_plugin_option('protect_filledin_disable_notice') ) {
-        $protection_notice = '<p><small>(Note for WP Admins: Form Protected by <a href="http://foliovision.com/seo-tools/wordpress/plugins/fv-antispam/filled-in-protection">FV Antispam</a>)</small></p>';
+        $protection_notice = '<p><small>(Note for WP Admins: Form Protected by <a href="http://foliovision.com/seo-tools/wordpress/plugins/fv-antispam/filled-in-protection">FV Antispam</a>)</small></p>';
       }
       
-      $form_protected = preg_replace( '~(<form[\s\S]*?)(<input type="hidden" name="filled_in_form" value="\d+"/>)([\s\S]*?</form>)~', $protection_notice.'$1$2<textarea id="'.$this->get_filled_in_fake_field_name().'" name="'.$this->get_filled_in_fake_field_name().'" rows="12" cols="40" style="display:none;"></textarea>$3', $form );
+      if( !FV_Antispam::get_plugin_option('my_own_styling') ) {
+
+        $css = '#'.$this->get_filled_in_fake_field_name().' { display: none; } ';
+
+        $css = '<style>'.$css.'</style>';
+      }
+      
+      $form_protected = preg_replace( '~(<form[\s\S]*?)(<input type="hidden" name="filled_in_form" value="\d+"/>)([\s\S]*?)(<[^<]*?submit)([\s\S]*?</form>)~', $protection_notice.'$1$2$3<textarea id="'.$this->get_filled_in_fake_field_name().'" name="'.$this->get_filled_in_fake_field_name().'" rows="12" cols="40"></textarea>'.$css."\n".'$4$5', $form );
       $content = str_replace( $form, $form_protected, $content );
     }
 
@@ -959,12 +956,82 @@ class FV_Antispam {
   function the_spam_count() {
     echo $this->get_spam_count();
   }
- 
- 
+  
+  function protect_spam_registrations_style() {
+    ?>
+    <style type="text/css">
+      #user_email {display: none;}
+    </style>      
+    <?php
+  }
+  
+  function replace_email_registration_field_start() {            
+    ob_start();
+  }
+  
+  function replace_email_registration_field_flush() {
+    $html = ob_get_clean();
+    if (current_user_can('manage_options')) {
+      $protection_notice = '<p class="message"><small>(Note for WP Admins: Form Protected by <a href="' . site_url() . '/wp-admin/options-general.php?page=fv-antispam/fv-antispam.php">FV Antispam</a>)</small></p>';
+      $html = preg_replace("~(<\/h1>)\s*?(.*?)\s*?(<form)~", '$1$2' . $protection_notice . '$3', $html);
+    }       
+    echo preg_replace("~(<input.*?name\=\"user_email\".*?\/>)~", '$1<input type="email" name="' . $this->protect(-1) . '" id="user_email_" class="input" value="' . (isset($_POST[$this->protect(-1)]) ? $_POST[$this->protect(-1)] : "") . '" size="25" tabindex="20" />' , $html);    
+  }
+  
+  function protect_spam_registrations_check() {
+    if (isset($_POST['user_email'])) {          
+      if ($_POST['user_email'] == "") {
+        $_POST['user_email'] = $_POST[$this->protect(-1)];
+      }
+      else {              
+        //write to log
+        $file = "spam.log";
+        $fh = fopen($file, 'a'); 
+        fwrite($fh, implode(", ", $_POST) . ", " . date("Ymd") . "\n");        
+        fclose($fh);
+        $_POST['user_email'] = "";
+      }
+    }    
+  }
+  
+  function replace_message_field_flush() {
+    $html = ob_get_clean();
+    if (current_user_can('manage_options')) {      
+      $protection_notice = '<p class="message"><small>(Note for WP Admins: Form Protected by <a href="' . site_url() . '/wp-admin/options-general.php?page=fv-antispam/fv-antispam.php">FV Antispam</a>)</small></p>';
+      $html = preg_replace("~(<\/h1>)\s*?(.*?)\s*?(<form)~", '$1$2' . $protection_notice . '$3', $html);
+    }
+    echo $html;
+  }
+  
+  public function InitiateCron() {
+    if( !wp_next_scheduled( 'fv_clean_trash_hourly' ) ){
+      wp_schedule_event( time(), 'hourly', 'fv_clean_trash_hourly' );
+    }
+  }
+  
+  public function clean_comments_trash() {
+    global $wpdb;
+    
+    if( !$this->get_plugin_option('cronjob_enable') ) {
+      return;
+    }
+    
+    $date = date('Y-m-d H:i:s' ,mktime(0, 0, 0, date("m")-1, date("d"), date("Y")));
+    $comments = $wpdb->get_results("SELECT comment_ID FROM $wpdb->comments WHERE comment_date_gmt < ' $date ' AND comment_approved = 'trash' LIMIT 1000", ARRAY_N);
+    
+    $comments_imploded = '';
+    foreach($comments as $comment) {
+      $comments_imploded .= $comment[0] . ',';      
+    }
+    $comments_imploded = substr($comments_imploded, 0, -1);
+    
+    $wpdb->query("DELETE FROM $wpdb->commentmeta WHERE comment_id IN ($comments_imploded)");
+    $wpdb->query("DELETE FROM $wpdb->comments WHERE comment_ID IN ($comments_imploded)");                
+  }    
+  
 }
 
 $GLOBALS['FV_Antispam'] = new FV_Antispam();
-
 
 /*
 Extra
