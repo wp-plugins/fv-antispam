@@ -1019,14 +1019,16 @@ class FV_Antispam {
     $date = date('Y-m-d H:i:s' ,mktime(0, 0, 0, date("m")-1, date("d"), date("Y")));
     $comments = $wpdb->get_results("SELECT comment_ID FROM $wpdb->comments WHERE comment_date_gmt < ' $date ' AND comment_approved = 'trash' LIMIT 1000", ARRAY_N);
     
-    $comments_imploded = '';
-    foreach($comments as $comment) {
-      $comments_imploded .= $comment[0] . ',';      
-    }
-    $comments_imploded = substr($comments_imploded, 0, -1);
-    
-    $wpdb->query("DELETE FROM $wpdb->commentmeta WHERE comment_id IN ($comments_imploded)");
-    $wpdb->query("DELETE FROM $wpdb->comments WHERE comment_ID IN ($comments_imploded)");                
+    if(count($comments)) {
+      $comments_imploded = '';
+      foreach($comments as $comment) {
+        $comments_imploded .= $comment[0] . ',';      
+      }
+      $comments_imploded = substr($comments_imploded, 0, -1);
+      
+      $wpdb->query("DELETE FROM $wpdb->commentmeta WHERE comment_id IN ($comments_imploded)");
+      $wpdb->query("DELETE FROM $wpdb->comments WHERE comment_ID IN ($comments_imploded)");   
+    }   
   }    
   
 }
