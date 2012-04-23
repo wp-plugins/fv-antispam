@@ -278,8 +278,6 @@ class FV_Antispam {
       
     if ( $res || $res2 == 1 ) {
       wp_set_comment_status( $id, 'trash' );
-      //$fp = fopen( 'trashedforreal', 'a' );
-      //fwrite( $fp, "\n: ".$id.' - '.var_export( $commentdata, true )."\n" );
     }
      
   }
@@ -993,11 +991,6 @@ class FV_Antispam {
       }
       else {              
         //write to log
-        $file = "spam.log";
-        $fh = fopen($file, 'a'); 
-        fwrite($fh, implode(", ", $_POST) . ", " . date("Ymd") . "\n");        
-        fclose($fh);
-        $_POST['user_email'] = "";
       }
     }    
   }
