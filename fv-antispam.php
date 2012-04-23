@@ -4,7 +4,7 @@ Plugin Name: FV Antispam
 Plugin URI: http://foliovision.com/seo-tools/wordpress/plugins/fv-antispam
 Description: Powerful and simple antispam plugin. Puts all the spambot comments directly into trash and let's other plugins (Akismet) deal with the rest.
 Author: Foliovision
-Version: 1.8.4
+Version: 1.9
 Author URI: http://www.foliovision.com
 */
 
@@ -82,16 +82,20 @@ class FV_Antispam {
     }
     
     add_action( 'fv_clean_trash_hourly', array( $this, 'clean_comments_trash' ) );
+    add_action( 'wp_insert_comment', array( $this, 'akismet_auto_check_update_meta' ), 11, 2 );
   }
   
   
-  /*function init_scheduled_hook() {
-    if (function_exists('wp_schedule_event')) {
-      if (!wp_next_scheduled('antispam_bee_daily_cronjob')) {
-        wp_schedule_event(time(), 'daily', 'antispam_bee_daily_cronjob');
-      }
-    }
-  }*/
+  ///	DEV TODO
+	function akismet_auto_check_update_meta( $id, $comment ) {
+		global $akismet_last_comment;
+//file_put_contents('akismet-spam.txt',date('c').' comment:'.$id.' '.var_export($akismet_last_comment,true)."\n", FILE_APPEND );		
+		if( isset($akismet_last_comment['akismet_result']) && $akismet_last_comment['akismet_result'] == 'true' && ($comment->comment_type == 'pingback' || $comment->comment_type == 'trackback') ) {
+			update_comment_meta( $comment->comment_ID, 'fv_antispam_debug', 'is Akismet spam, removing' );
+			wp_trash_comment( $comment->comment_ID );
+//file_put_contents('akismet-spam.txt',date('c').' comment:'.$id.' trashed by FV Antispam!'."\n", FILE_APPEND );				
+		}
+	}
   
   
   function clear_scheduled_hook() {
@@ -204,8 +208,12 @@ class FV_Antispam {
     $problems = get_option( 'fv_antispam_filledin_conflict' );
     if( $problems === false ) {
       global $wpdb;
-      
-      $forms = $wpdb->get_col( "SELECT name FROM {$wpdb->prefix}filled_in_forms" );
+
+      $table_exists = $wpdb->get_var( "SHOW TABLES WHERE `Tables_in_{$wpdb->dbname}` = '{$wpdb->prefix}filled_in_forms'" );
+
+      if( $table_exists ) {
+      	$forms = $wpdb->get_col( "SELECT name FROM {$wpdb->prefix}filled_in_forms" );
+      }
       
       if( $forms ) {
         $where = array();
@@ -1018,17 +1026,17 @@ class FV_Antispam {
     
     $date = date('Y-m-d H:i:s' ,mktime(0, 0, 0, date("m")-1, date("d"), date("Y")));
     $comments = $wpdb->get_results("SELECT comment_ID FROM $wpdb->comments WHERE comment_date_gmt < ' $date ' AND comment_approved = 'trash' LIMIT 1000", ARRAY_N);
+
+    if( count($comments) ) {    
+			$comments_imploded = '';
+			foreach($comments as $comment) {
+				$comments_imploded .= $comment[0] . ',';      
+			}
+			$comments_imploded = substr($comments_imploded, 0, -1);
     
-    if(count($comments)) {
-      $comments_imploded = '';
-      foreach($comments as $comment) {
-        $comments_imploded .= $comment[0] . ',';      
-      }
-      $comments_imploded = substr($comments_imploded, 0, -1);
-      
-      $wpdb->query("DELETE FROM $wpdb->commentmeta WHERE comment_id IN ($comments_imploded)");
-      $wpdb->query("DELETE FROM $wpdb->comments WHERE comment_ID IN ($comments_imploded)");   
-    }   
+    	$wpdb->query("DELETE FROM $wpdb->commentmeta WHERE comment_id IN ($comments_imploded)");
+    	$wpdb->query("DELETE FROM $wpdb->comments WHERE comment_ID IN ($comments_imploded)");                
+    }
   }    
   
 }
