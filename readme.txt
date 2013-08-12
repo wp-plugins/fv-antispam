@@ -22,6 +22,7 @@ Our studies on our own sites have shown that for every 50 human spam comments a 
 * Reliable.
 * Zero false positives.
 * Virtually no CPU server load.
+* Works with the most powerful Wordpress form processor - [Filled In](http://wordpress.org/plugins/filled-in/).
 
 = How does FV AntiSpam work so well? =
 
@@ -37,6 +38,16 @@ Our studies on our own sites have shown that for every 50 human spam comments a 
 [Support and more information](http://foliovision.com/seo-tools/wordpress/plugins/fv-antispam)
 
 == Changelog ==
+
+= 2.0 =
+
+* Added JavaScript protection (used for both comments and Filled in)
+* Added protection against spam user registrations
+* Added protection for FAQ-Tastic
+* Filled in protection - spam submissions go into failed submissions
+* Filled in now uses Akismet to check the submission (just install the plugin)
+* Fix for templates which pre-fill the comment field with some text
+* Fix for templates which pre-fill comment fields with their labels using JavaScript
 
 = 1.9 =
 
