@@ -743,7 +743,7 @@ function fvaq() {
 			}
 		}
 	}
-	if( document.getElementById('comment') !== undefined ) {
+	if( document.getElementById('comment') != null ) {
 		document.getElementById('comment').value = '';
 	}
 }
