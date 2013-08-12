@@ -1406,6 +1406,7 @@ window.onload = function(e) { fvaq(); setTimeout('fvaq', 250); };
     }
       
     if ( $res || $res2 == 1 ) {
+      remove_action('edit_post', 'hyper_cache_invalidate_post', 0);
       wp_set_comment_status( $id, 'trash' );
     }
      
