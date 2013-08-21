@@ -39,6 +39,10 @@ Our studies on our own sites have shown that for every 50 human spam comments a 
 
 == Changelog ==
 
+= 2.1 =
+
+* Fix for JS error in IE7-8. This error forced IE7-8 users to answer the security question manually.
+
 = 2.0 =
 
 * Added JavaScript protection (used for both comments and Filled in)
