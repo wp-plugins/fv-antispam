@@ -4,11 +4,14 @@ Plugin Name: FV Antispam
 Plugin URI: http://foliovision.com/seo-tools/wordpress/plugins/fv-antispam
 Description: Powerful and simple antispam plugin. Puts all the spambot comments directly into trash and let's other plugins (Akismet) deal with the rest.
 Author: Foliovision
-Version: 2.1
+Version: 2.2
 Author URI: http://www.foliovision.com
 */
 
 
+$fv_antispam_ver = '2.2';
+$FV_Antispam_iFilledInCount = 0;
+$FV_Antispam_bMathJS = false;
 
 
 if (!function_exists ('is_admin')) {
@@ -23,16 +26,27 @@ require_once( dirname(__FILE__) . '/include/fp-api.php' );
 
 class FV_Antispam extends FV_Antispam_Plugin {
 
+  var $aDefaultOptions;
   var $basename;
   var $protect;
-  var $locale;
-  
+  var $locale;  
   
   
   function FV_Antispam() {
     $this->basename = plugin_basename(__FILE__);
     $this->func__protect = 'a'.substr(md5(get_bloginfo('url')), 0, 10).'';
     $this->locale = get_locale();
+    $this->aDefaultOptions = array( 'trash_banned' => true, 'protect_filledin' => true, 'spam_registrations' => true, 'cronjob_enable' => true, 'questions' => "What color is orange?,orange\nWhat color is a lemon?,yellow" );
+    
+    global $fv_antispam_ver;
+    if( strcmp(get_option('fv_antispam_ver'),$fv_antispam_ver) !== 0 ) {        
+      if( !$options = get_option( 'fv_antispam' ) ) {
+        $options = array();
+      }
+      $options = array_merge($options, $this->aDefaultOptions );
+      update_option( 'fv_antispam', $options );
+      update_option( 'fv_antispam_ver', $fv_antispam_ver );
+    }
     
     if (is_admin()) {
       
@@ -59,7 +73,7 @@ class FV_Antispam extends FV_Antispam_Plugin {
         add_action( 'comment_status_links', array( $this, 'admin__comment_status_links' ) );
       }      
          
-      add_action( 'init', array( $this, 'admin__load_plugin_lang' ) );
+      add_action( 'init', array( $this, 'admin__init' ) );
 
       add_action( 'deactivate_' .$this->basename, array( $this, 'cron__clear_scheduled_hook' ) );      
       add_action( 'init', array( $this, 'cron__init' ) );      
@@ -69,8 +83,29 @@ class FV_Antispam extends FV_Antispam_Plugin {
       
 		  $this->readme_URL = 'http://plugins.trac.wordpress.org/browser/fv-antispam/trunk/readme.txt?format=txt';    
 		  if( !has_action( 'in_plugin_update_message-fv-antispam/fv-antispam.php' ) ) {
-	   		add_action( 'in_plugin_update_message-fv-antispam/fv-antispam.php', array( &$this, 'plugin_update_message' ) );
-	   	}      
+	   		add_action( 'in_plugin_update_message-fv-antispam/fv-antispam.php', array( $this, 'plugin_update_message' ) );
+	   	}
+          
+        
+      add_filter( 'get_user_option_closedpostboxes_fv_antispam_settings', array( $this, 'util__closed_meta_boxes' ) );
+            
+      $this->pointer_boxes = array();
+
+      if( 1<0 && !$this->func__get_plugin_option('notice_custom_questions') && $this->util__is_filled_in() ) {
+        $this->pointer_boxes['fv_antispam_notice_custom_questions'] = array(
+          'id' => '#wpadminbar',
+          'heading' => __('FV Antispam Custom Questions', 'fv_flowplayer'),
+          'content' => __('Antispam for Filled in forms has changed! Please test your forms! <br /><br />Visit Settings &raquo; <a href="'.admin_url('options-general.php?page=fv-antispam/fv-antispam.php').'">FV Antispam</a> to put in your own custom questions. Use "Skip custom question on forms" option to select which form should use hidden JavaScript antispam.', 'fv_flowplayer'),
+          'position' => array( 'edge' => 'top', 'align' => 'center' ),
+          'button1' => __('I understand', 'fv_flowplayer'),
+          'button2' => __('I\'ll check this later', 'fv_flowplayer'),
+        );
+      }
+      
+      add_action( 'wp_ajax_fv_foliopress_ajax_pointers', array( $this, 'util__pointers_ajax' ) );
+
+      parent::__construct();
+
     } else {
     
       add_action( 'comment_post', array( $this, 'func__trash_comment' ), 1000 ); //  all you need
@@ -81,6 +116,7 @@ class FV_Antispam extends FV_Antispam_Plugin {
       
       if ($GLOBALS['pagenow'] == 'wp-login.php' && $this->func__get_plugin_option('spam_registrations')) {
 				add_action( 'login_head', array( $this, 'disp__login_form_js' ) );
+				add_action( 'login_enqueue_scripts', array( $this, 'func__login_scripts') );
         add_action( 'login_form', array( $this, 'disp__login_form_notice' ) );
         add_action( 'register_form', array( $this, 'disp__login_form_notice' ) );
         add_action( 'init', array( $this, 'func__spam_registrations_check' ), 0 );
@@ -91,6 +127,8 @@ class FV_Antispam extends FV_Antispam_Plugin {
 	    
 	    if( $this->func__get_plugin_option('protect_filledin') ) {
   		  add_filter( 'the_content', array( $this, 'disp__the_content' ), 999 );
+  		  add_filter( 'the_excerpt', array( $this, 'disp__the_content' ), 999 );  		  
+  		  add_filter( 'widget_text', array( $this, 'disp__the_content' ), 999 );  		  
   		}
   		
       if( $_SERVER['REQUEST_METHOD'] == 'POST' && isset ($_POST['filled_in_form']) && $this->func__get_plugin_option('protect_filledin') ) {
@@ -100,6 +138,7 @@ class FV_Antispam extends FV_Antispam_Plugin {
       add_action( 'template_redirect', array( $this, 'func__replace_comment_field' ) );	    
       
       add_action( 'wp_print_footer_scripts', array( $this, 'disp__footer_scripts' ) );
+      add_action( 'wp_head', array( $this, 'disp__head_css' ) );
       
     }
     
@@ -195,7 +234,7 @@ class FV_Antispam extends FV_Antispam_Plugin {
     */    
   function admin__filled_in_collision_check( $force = false ) {
     if( stripos( $_SERVER['REQUEST_URI'], 'fv-antispam.php' ) && !$force ) return;
-    
+
     $problems = get_option( 'fv_antispam_filledin_conflict' );
     if( $problems === false ) {
       global $wpdb;
@@ -237,7 +276,7 @@ class FV_Antispam extends FV_Antispam_Plugin {
       foreach( $problems AS $key=>$problems_item ) {
         $problematic_message .= ' <a title="Post \''.$problems_item['post_title'].'\' containing form \''.$problems_item['form_name'].'\'" href="'.get_bloginfo( 'url' ).'?p='.$problems_item['post_id'].'">'.$problems_item['post_id'].'</a>';
       }
-      echo '<div class="error fade"><p>FV Antispam detected that following posts contain Filled in forms that conflict with FV Antispam fake field name:'.$problematic_message.'. Please set a different fake field name <a href="'.get_bloginfo( 'wpurl' ).'/wp-admin/options-general.php?page=fv-antispam/fv-antispam.php">here</a>. <a href="http://foliovision.com/seo-tools/wordpress/plugins/fv-antispam/filled-in-protection">Read more</a> about this issue.</p></div>'; 
+      return '<div class="error fade"><p>FV Antispam detected that following posts contain Filled in forms that conflict with FV Antispam fake field name:'.$problematic_message.'. Please set a different fake field name <a href="'.get_bloginfo( 'wpurl' ).'/wp-admin/options-general.php?page=fv-antispam/fv-antispam.php">here</a>. <a href="http://foliovision.com/seo-tools/wordpress/plugins/fv-antispam/filled-in-protection">Read more</a> about this issue.</p></div>'; 
 
     }
   }  
@@ -263,18 +302,18 @@ class FV_Antispam extends FV_Antispam_Plugin {
     }
     return $links;
   }  
-
-
-
-
-  function admin__init_plugin_options() {
-    add_option( 'fv_antispam', array( 'trash_banned' => true, 'protect_filledin' => true, 'spam_registrations' => true, 'cronjob_enable' => true ) );
-  }
   
   
   
-  
-  function admin__load_plugin_lang() {
+  function admin__init() {
+		if( !isset($_GET['page']) || $_GET['page'] != "fv-antispam/fv-antispam.php" ) {
+      return;    
+    }
+    
+		wp_enqueue_script('common');
+		wp_enqueue_script('wp-lists');
+		wp_enqueue_script('postbox');			    
+    
     if ($this->util__is_min_wp('2.7')) {
       load_plugin_textdomain( 'antispam_bee', false, 'fv-antispam/lang' );
     } else {
@@ -311,7 +350,7 @@ class FV_Antispam extends FV_Antispam_Plugin {
   }  
   
   
-  
+
   
   function admin__show_admin_menu() {
 	
@@ -319,6 +358,7 @@ class FV_Antispam extends FV_Antispam_Plugin {
     if (!empty($_POST)) {
     
     check_admin_referer('fvantispam');
+ 
     $options = array(
       //'flag_spam'=> (isset($_POST['antispam_bee_flag_spam']) ? (int)$_POST['antispam_bee_flag_spam'] : 0),
       'spam_registrations'=> (isset($_POST['spam_registrations']) ? (int)$_POST['spam_registrations'] : 0),
@@ -328,6 +368,7 @@ class FV_Antispam extends FV_Antispam_Plugin {
       //'no_notice'=> (isset($_POST['antispam_bee_no_notice']) ? (int)$_POST['antispam_bee_no_notice'] : 0),
       //'email_notify'=> (isset($_POST['antispam_bee_email_notify']) ? (int)$_POST['antispam_bee_email_notify'] : 0),
       'cronjob_enable'=> (isset($_POST['cronjob_enable']) ? (int)$_POST['cronjob_enable'] : 0),
+      'cronjob_writeout'=> (isset($_POST['cronjob_writeout']) ? (int)$_POST['cronjob_writeout'] : 0),
       //'cronjob_interval'=> (isset($_POST['antispam_bee_cronjob_interval']) ? (int)$_POST['antispam_bee_cronjob_interval'] : 0),
       //'dashboard_count'=> (isset($_POST['antispam_bee_dashboard_count']) ? (int)$_POST['antispam_bee_dashboard_count'] : 0),
       //'already_commented'=> (isset($_POST['antispam_bee_already_commented']) ? (int)$_POST['antispam_bee_already_commented'] : 0),
@@ -338,12 +379,26 @@ class FV_Antispam extends FV_Antispam_Plugin {
       'protect_filledin'=> (isset($_POST['protect_filledin']) ? (int)$_POST['protect_filledin'] : 0),
       'protect_filledin_disable_notice'=> (isset($_POST['protect_filledin_disable_notice']) ? (int)$_POST['protect_filledin_disable_notice'] : 0),
       'protect_filledin_field'=> $_POST['protect_filledin_field'],
-      'protect_filledin_notice'=> $_POST['protect_filledin_notice'],    
+      'protect_filledin_notice'=> stripslashes($_POST['protect_filledin_notice']),    
       'disable_pingback_notify'=> (isset($_POST['disable_pingback_notify']) ? (int)$_POST['disable_pingback_notify'] : 0),
       'pingback_notify_email'=> $_POST['pingback_notify_email'],
-      'comment_status_links'=> (isset($_POST['comment_status_links']) ? (int)$_POST['comment_status_links'] : 0)
+      'comment_status_links'=> (isset($_POST['comment_status_links']) ? (int)$_POST['comment_status_links'] : 0),
+      'filled_in_specials' => ( isset($_POST['filled_in_specials']) ? implode( ';', $_POST['filled_in_specials'] ) : '' ),
+      'filled_in_custom' => ( isset($_POST['filled_in_custom']) ? implode( ';', $_POST['filled_in_custom'] ) : '' )
       ///
     );
+    
+    if( isset($_POST['question']) && isset($_POST['answer']) && count($_POST['question']) > 0 && count($_POST['answer']) > 0 ) {
+      $aQuestions = '';
+      foreach( $_POST['question'] AS $key => $sQuestion ) {
+        if( strlen( trim($sQuestion) ) > 0 ) {
+          $aQuestions[] = stripslashes(trim($sQuestion)).','.stripslashes(trim($_POST['answer'][$key]));
+        }
+      }
+      if( $aQuestions ) {
+        $options['questions'] = implode( "\n", $aQuestions );
+      }
+    }
     
     $this->func__set_plugin_options($options); ?>
     <div id="message" class="updated fade">
@@ -355,244 +410,53 @@ class FV_Antispam extends FV_Antispam_Plugin {
     </div>
     <?php } ?>
     <div class="wrap">
+      <div style="position: absolute; right: 20px; margin-top: 5px">
+          <a href="http://foliovision.com/wordpress/plugins/fv-antispam" target="_blank" title="Documentation"><img alt="visit foliovision" src="http://foliovision.com/shared/fv-logo.png" /></a>
+      </div>
+
     <?php if ($this->util__is_min_wp('2.7')) { ?>
     <div id="icon-options-general" class="icon32"><br /></div>
     <?php }
- ?>
+    
+    ?>
     <h2>FV Antispam</h2>
     
-    <form method="post" action="">
-      <?php wp_nonce_field('fvantispam') ?>
-      <div id="poststuff" class="ui-sortable">
-      <div class="postbox">
-      <h3>
-      <?php _e('Settings') ?>
-      </h3>
-      <div class="inside">
-        <!--<table class="form-table">
-          <tr>
-            <td>
-              <label for="antispam_bee_flag_spam">
-              <input type="checkbox" name="antispam_bee_flag_spam" id="antispam_bee_flag_spam" value="1" <?php checked($this->func__get_plugin_option('flag_spam'), 1) ?> />
-              <?php _e('Mark as Spam, do not delete', 'antispam_bee') ?> <?php $this->admin__show_help_link('flag_spam') ?>
-              </label>
-            </td>
-          </tr>
-          <tr>
-            <td class="shift">
-              <input type="checkbox" name="antispam_bee_ignore_filter" id="antispam_bee_ignore_filter" value="1" <?php checked($this->func__get_plugin_option('ignore_filter'), 1) ?> />
-              <?php _e('Limit on', 'antispam_bee') ?> <select name="antispam_bee_ignore_type"><?php foreach(array(1 => __('Comments'), 2 => __('Pings')) as $key => $value) {
-              echo '<option value="' .$key. '" ';
-              selected($this->func__get_plugin_option('ignore_type'), $key);
-              echo '>' .$value. '</option>';
-              } ?>
-              </select> <?php $this->admin__show_help_link('ignore_filter') ?>
-            </td>
-          </tr>
-
-          <tr>
-            <td class="shift">
-              <label for="antispam_bee_no_notice">
-              <input type="checkbox" name="antispam_bee_no_notice" id="antispam_bee_no_notice" value="1" <?php checked($this->func__get_plugin_option('no_notice'), 1) ?> />
-              <?php _e('Hide the &quot;MARKED AS SPAM&quot; note', 'antispam_bee') ?>
-              </label>
-            </td>
-          </tr>
-          <tr>
-            <td class="shift">
-              <label for="antispam_bee_email_notify">
-              <input type="checkbox" name="antispam_bee_email_notify" id="antispam_bee_email_notify" value="1" <?php checked($this->func__get_plugin_option('email_notify'), 1) ?> />
-              <?php _e('Send an admin email when new spam item incoming', 'antispam_bee') ?>
-              </label>
-            </td>
-          </tr>
-        </table>-->
-        <table class="form-table">
-          <tr>
-            <td>
-              <label for="antispam_bee_ignore_pings">
-              <input type="checkbox" name="antispam_bee_ignore_pings" id="antispam_bee_ignore_pings" value="1" <?php checked($this->func__get_plugin_option('ignore_pings'), 1) ?> />
-              <?php _e('Do not check trackbacks / pingbacks', 'antispam_bee') ?>
-              </label>
-            </td>
-          </tr>
-          <?php if ($this->util__is_min_wp('2.7')) { ?>
-            <!--<tr>
-              <td>
-                <label for="antispam_bee_dashboard_count">
-                <input type="checkbox" name="antispam_bee_dashboard_count" id="antispam_bee_dashboard_count" value="1" <?php checked($this->func__get_plugin_option('dashboard_count'), 1) ?> />
-                <?php _e('Display blocked comments count on the dashboard', 'antispam_bee') ?> <?php $this->admin__show_help_link('dashboard_count') ?>
-                </label>
-              </td>
-            </tr>-->
-          <?php } ?>
-
-          <!--<tr>
-            <td>
-              <label for="antispam_bee_already_commented">
-              <input type="checkbox" name="antispam_bee_already_commented" id="antispam_bee_already_commented" value="1" <?php checked($this->func__get_plugin_option('already_commented'), 1) ?> />
-              <?php _e('Do not check for spam if the author has already commented and approved', 'antispam_bee') ?> <?php $this->admin__show_help_link('already_commented') ?>
-              </label>
-            </td>
-          </tr>-->
-          <!--<tr>
-            <td>
-              <label for="antispam_bee_always_allowed">
-              <input type="checkbox" name="antispam_bee_always_allowed" id="antispam_bee_always_allowed" value="1" <?php checked($this->func__get_plugin_option('always_allowed'), 1) ?> />
-              <?php _e('Comments are also used outside of posts and pages', 'antispam_bee') ?> <?php $this->admin__show_help_link('always_allowed') ?>
-              </label>
-            </td>
-          </tr>-->
-          <tr>
-            <td>
-              <label for="my_own_styling">
-              <input type="checkbox" name="my_own_styling" id="my_own_styling" value="1" <?php checked($this->func__get_plugin_option('my_own_styling'), 1) ?> />
-              <?php _e('I\'ll put in my own styling', 'antispam_bee') ?><span class="description">(Make sure that #comment is hidden in your CSS!)</span>
-              </label>
-            </td>
-          </tr>
-          <tr>
-            <td>
-              <label for="trash_banned">
-              <input type="checkbox" name="trash_banned" id="trash_banned" value="1" <?php checked($this->func__get_plugin_option('trash_banned'), 1) ?> />
-              <?php _e('Trash banned (blacklisted) comments, don\'t just mark them as spam', 'antispam_bee') ?>
-              </label>
-            </td>
-          </tr>
-          <tr>
-            <td>
-              <label for="spam_registrations">
-              <input type="checkbox" name="spam_registrations" id="spam_registrations" value="1" <?php checked($this->func__get_plugin_option('spam_registrations'), 1) ?> />
-              <?php _e('Protect the registration form', 'antispam_bee') ?>
-              </label>
-            </td>
-          </tr>
-          <tr>
-            <td>
-              <label for="comment_status_links">
-              <input type="checkbox" name="comment_status_links" id="comment_status_links" value="1" <?php checked($this->func__get_plugin_option('comment_status_links'), 1) ?> />
-              <?php _e('Enhance Wordpress Admin Comments section', 'antispam_bee') ?> <span class="description">Hides trackbacks and shows separate counts for comments and trackbacks</span>
-              </label>
-            </td>
-          </tr>            
-          <tr>
-            <td>
-              <label for="cronjob_enable">
-              <input type="checkbox" name="cronjob_enable" id="cronjob_enable" value="1" <?php checked($this->func__get_plugin_option('cronjob_enable'), 1) ?> />
-              Remove trash comments older than 30 days
-              </label>
-            </td>
-          </tr>                  
-          <tr>
-            <td>
-              <div class="postbox">
-                <h3>Pingback/trackback notification tweaks</h3>
-                <div class="inside">
-                  <table class="form-table">
-                    <tr>
-                      <td>
-                      Enter alternative email address for pingback and trackback notifications<br />
-                        <label for="pingback_notify_email">
-                        <input type="text" class="regular-text" name="pingback_notify_email" id="pingback_notify_email" value="<?php if( function_exists( 'esc_attr' ) ) echo esc_attr( $this->func__get_plugin_option('pingback_notify_email') ); else echo ( $this->func__get_plugin_option('pingback_notify_email') ); ?>" />
-                        <span class="description"><?php _e('Leave empty if you want to use the default address from General Settings', 'antispam_bee') ?> <?php $this->admin__show_help_link('disable_pingback_notify') ?></span>
-                        </label>
-                      </td>
-                    </tr>
-                    <tr>
-                      <td>
-                      Or<br />
-                        <label for="disable_pingback_notify">
-                        <input type="checkbox" name="disable_pingback_notify" id="disable_pingback_notify" value="1" <?php checked($this->func__get_plugin_option('disable_pingback_notify'), 1) ?> />
-                        <?php _e('Disable notifications for pingbacks and trackbacks', 'antispam_bee') ?> 
-                        </label>
-                      </td>
-                    </tr>           
-                  </table>
-                </div>
-              </div>
-            </td>
-          </tr>
-          <tr>
-            <td>
-              <div class="postbox">
-                <h3>Filled In forms spam protection</h3>
-                <div class="inside">
-                  <table class="form-table">
-                    <tr>
-                      <td>
-                        <label for="protect_filledin">
-                        <input type="checkbox" name="protect_filledin" id="protect_filledin" value="1" <?php checked($this->func__get_plugin_option('protect_filledin'), 1) ?> />
-                        <?php _e('Protect Filled in forms', 'antispam_bee') ?>
-                        </label>
-                      </td>
-                    </tr>
-                    <tr>
-                      <td>
-                      Enter fake field name<br />
-                        <label for="protect_filledin_field">
-                        <input type="text" class="regular-text" name="protect_filledin_field" id="protect_filledin_field" value="<?php if( function_exists( 'esc_attr' ) ) echo esc_attr( $this->func__get_plugin_option('protect_filledin_field') ); else echo ( $this->func__get_plugin_option('protect_filledin_field') ); ?>" />
-                        <span class="description"><?php _e('Leave empty if you want to use the default', 'antispam_bee') ?> <?php $this->admin__show_help_link('protect_filledin_field') ?></span>
-                        </label>
-                      </td>
-                    </tr>
-                    <tr>
-                      <td>
-                      Enter spam message<br />
-                        <label for="protect_filledin_notice">
-                        <input type="text" class="regular-text" name="protect_filledin_notice" id="protect_filledin_notice" value="<?php if( function_exists( 'esc_attr' ) ) echo esc_attr( $this->func__get_plugin_option('protect_filledin_notice') ); else echo ( $this->func__get_plugin_option('protect_filledin_notice') ); ?>" />
-                        <span class="description"><?php _e('This is a failsafe if a real person is caught as spam', 'antispam_bee') ?> <?php $this->admin__show_help_link('protect_filledin_notice') ?></span>
-                        </label>
-                      </td>
-                    </tr>         
-<?php if( function_exists('akismet_init') ) : ?>                        
-                    <tr>
-                      <td>
-                      Akismet detected, it will be used for checking of Filled in submission IPs.
-                      </td>
-                    </tr>      
-<?php endif; ?>                    
-                    <tr>
-                      <td>
-                        <label for="protect_filledin_disable_notice">
-                        <input type="checkbox" name="protect_filledin_disable_notice" id="protect_filledin_disable_notice" value="1" <?php checked($this->func__get_plugin_option('protect_filledin_disable_notice'), 1) ?> />
-                        <?php _e('Disable protection notice', 'antispam_bee') ?> <span class="description"><?php _e('(Logged in administrators normall see a notice that FV Antispam is protecting a Filled in form)', 'antispam_bee') ?></span>
-                        </label>
-                      </td>
-                    </tr>
-                    <tr>
-                      <td>
-                        <?php
-                        $problems = get_option( 'fv_antispam_filledin_conflict' );
-                        if( $problems ) {
-                          $this->admin__filled_in_collision_check( true );
-                        }
-                        else if( $problems === false ) {
-                          $this->admin__filled_in_collision_check( true );
-                        } else {
-                          ?>No conflicts with Filled In detected<?php
-                        }
-                        ?>
-                      </td>
-                    </tr>
-                             
-                  </table>
-                </div>
-              </div>
-            </td>
-          </tr>
-        </table>
-        <p>
+  <form id="fv_antispam_options" method="post" action="">  
+		<div id="dashboard-widgets" class="metabox-holder columns-1">
+			<div id='postbox-container-1' class='postbox-container' style="width: 100%;">    
+				<?php
+        
+        add_meta_box( 'fv_antispam_basic', 'Basic', array($this,'disp__admin_basic'), 'fv_antispam_settings', 'normal' );
+        add_meta_box( 'fv_antispam_advanced', 'Advanced', array($this,'disp__admin_advanced'), 'fv_antispam_settings', 'normal' );
+        add_meta_box( 'fv_antispam_filled_in', 'Filled In Support', array($this,'disp__admin_filled_in'), 'fv_antispam_settings', 'normal' );
+    
+				do_meta_boxes('fv_antispam_settings', 'normal', false );
+				wp_nonce_field( 'closedpostboxes', 'closedpostboxesnonce', false );
+				wp_nonce_field( 'meta-box-order-nonce', 'meta-box-order-nonce', false );
+				?>
+        <?php wp_nonce_field('fvantispam') ?>
         <input type="submit" name="fv_antispam_submit" class="button-primary" value="<?php _e('Save Changes') ?>" />
-        </p>
-      </div>
-      </div>
-      </div>
-    </form>
+			</div>
+		</div>  
+  </form>
+  
+  <script type="text/javascript">
+    //<![CDATA[
+    jQuery(document).ready( function($) {
+      // close postboxes that should be closed
+      $('.if-js-closed').removeClass('if-js-closed').addClass('closed');
+      // postboxes setup
+      postboxes.add_postbox_toggles('fv_antispam_settings');
+    });
+    //]]>
+  </script>  
+    
+
     </div>
   <?php
   }  
   
-  
+   
   
   
   function admin__show_dashboard_count() {
@@ -671,18 +535,36 @@ class FV_Antispam extends FV_Antispam_Plugin {
       return;
     }
     
-    $date = date('Y-m-d H:i:s' ,mktime(0, 0, 0, date("m")-1, date("d"), date("Y")));
-    $comments = $wpdb->get_results("SELECT comment_ID FROM $wpdb->comments WHERE comment_date_gmt < ' $date ' AND comment_approved = 'trash' LIMIT 1000", ARRAY_N);
+    $bWriteOut = ( $this->func__get_plugin_option('cronjob_writeout') ) ? true : false;
+      
+    if( 1 ) { //  todo: option
+      $date = $wpdb->get_var( "SELECT comment_date_gmt FROM $wpdb->comments WHERE comment_approved = 'trash' ORDER BY comment_date_gmt DESC LIMIT 20000,1" );
+    } else {     
+      $date = date('Y-m-d H:i:s' ,mktime(0, 0, 0, date("m")-1, date("d"), date("Y")));
+    }
+    $comments = $wpdb->get_results("SELECT * FROM $wpdb->comments WHERE comment_id NOT IN ( select comment_id from $wpdb->commentmeta where meta_key = '_wp_trash_meta_time' ) AND comment_date_gmt < '$date' AND comment_approved = 'trash' ORDER BY comment_date_gmt ASC LIMIT 5000");
+    if( count($comments) ) {      
+      $sWriteOut = 'FV Antispam Clean-up started at '.date('r')."\n--------\n";
+      foreach($comments as $comment) {
+        if( $bWriteOut ) {
+          $sWriteOut .= var_export($comment,true)."\n---\n\n";
+        } 
+        $comments_imploded .= $comment->comment_ID . ',';      
+      }
+      $comments_imploded = substr($comments_imploded, 0, -1);
+      if( $bWriteOut ) {
+        @file_put_contents( dirname(__FILE__).'/spamlog-'.preg_replace( '~(\d\d\d\d-\d\d-\d\d).*$~', '$1', $comment->comment_date_gmt ).'.log', $sWriteOut, FILE_APPEND ); //  todo: write check and directory change
+      }
+      $wpdb->query("DELETE FROM $wpdb->commentmeta WHERE comment_id IN ($comments_imploded)");
+      $wpdb->query("DELETE FROM $wpdb->comments WHERE comment_ID IN ($comments_imploded)");
+    }
 
-    if( count($comments) ) {    
-			$comments_imploded = '';
-			foreach($comments as $comment) {
-				$comments_imploded .= $comment[0] . ',';      
-			}
-			$comments_imploded = substr($comments_imploded, 0, -1);
-    
-    	$wpdb->query("DELETE FROM $wpdb->commentmeta WHERE comment_id IN ($comments_imploded)");
-    	$wpdb->query("DELETE FROM $wpdb->comments WHERE comment_ID IN ($comments_imploded)");                
+    if( $bWriteOut ) {
+      $sDate = date( 'Y-m-d', strtotime( "-1 month" ) );
+      $sFile = dirname(__FILE__).'/spamlog-'.$sDate.'.log';
+      if( file_exists( $sFile ) ) {
+        !@unlink( $sFile );
+      }
     }
   }      
   
@@ -709,6 +591,336 @@ class FV_Antispam extends FV_Antispam_Plugin {
   
   
   
+  function disp__admin_advanced() {
+    ?>
+      <div class="inside">
+        <table class="form-table">
+          <tr>
+            <td>
+              <label for="my_own_styling">
+              <input type="checkbox" name="my_own_styling" id="my_own_styling" value="1" <?php checked($this->func__get_plugin_option('my_own_styling'), 1) ?> />
+              <?php _e('I\'ll put in my own styling', 'antispam_bee') ?> <span class="description">(Make sure that <code>form .message-textarea</code> is hidden in your CSS!)</span>
+              </label>
+            </td>
+          </tr>
+          <tr>
+            <td>
+              <label for="antispam_bee_ignore_pings">
+              <input type="checkbox" name="antispam_bee_ignore_pings" id="antispam_bee_ignore_pings" value="1" <?php checked($this->func__get_plugin_option('ignore_pings'), 1) ?> />
+              <?php _e('Do not check trackbacks / pingbacks', 'antispam_bee') ?>
+              </label>
+            </td>
+          </tr>          
+          <tr>
+            <td>
+            Enter alternative email address for pingback and trackback notifications<br />
+              <label for="pingback_notify_email">
+              <input type="text" class="regular-text" name="pingback_notify_email" id="pingback_notify_email" value="<?php if( function_exists( 'esc_attr' ) ) echo esc_attr( $this->func__get_plugin_option('pingback_notify_email') ); else echo ( $this->func__get_plugin_option('pingback_notify_email') ); ?>" />
+              <span class="description"><?php _e('Leave empty if you want to use the default address from General Settings', 'antispam_bee') ?> <?php $this->admin__show_help_link('disable_pingback_notify') ?></span>
+              </label>
+            </td>
+          </tr>
+          <tr>
+            <td>
+              <label for="disable_pingback_notify">
+              <input type="checkbox" name="disable_pingback_notify" id="disable_pingback_notify" value="1" <?php checked($this->func__get_plugin_option('disable_pingback_notify'), 1) ?> />
+              <?php _e('Disable notifications for pingbacks and trackbacks', 'antispam_bee') ?> 
+              </label>
+            </td>
+          </tr>
+          <tr>
+            <td>
+              <label for="comment_status_links">
+              <input type="checkbox" name="comment_status_links" id="comment_status_links" value="1" <?php checked($this->func__get_plugin_option('comment_status_links'), 1) ?> />
+              <?php _e('Enhance Wordpress Admin Comments section', 'antispam_bee') ?> <span class="description">Hides trackbacks and shows separate counts for comments and trackbacks</span>
+              </label>
+            </td>
+          </tr>              
+          <tr>
+            <td>
+              <label for="cronjob_writeout">
+              <input type="checkbox" name="cronjob_writeout" id="cronjob_writeout" value="1" <?php checked($this->func__get_plugin_option('cronjob_writeout'), 1) ?> />
+              Write out removed comments into files (<abbr title="For debug and troubleshooting">?</abbr>)
+              </label>
+            </td>
+          </tr>                
+        </table>
+      </div>
+    <?php
+  }
+  
+  
+  
+  
+  function disp__admin_basic() {
+    ?>
+      <div class="inside">
+        <table class="form-table">
+
+          <?php if ($this->util__is_min_wp('2.7')) { ?>
+            <!--<tr>
+              <td>
+                <label for="antispam_bee_dashboard_count">
+                <input type="checkbox" name="antispam_bee_dashboard_count" id="antispam_bee_dashboard_count" value="1" <?php checked($this->func__get_plugin_option('dashboard_count'), 1) ?> />
+                <?php _e('Display blocked comments count on the dashboard', 'antispam_bee') ?> <?php $this->admin__show_help_link('dashboard_count') ?>
+                </label>
+              </td>
+            </tr>-->
+          <?php } ?>
+
+          <!--<tr>
+            <td>
+              <label for="antispam_bee_already_commented">
+              <input type="checkbox" name="antispam_bee_already_commented" id="antispam_bee_already_commented" value="1" <?php checked($this->func__get_plugin_option('already_commented'), 1) ?> />
+              <?php _e('Do not check for spam if the author has already commented and approved', 'antispam_bee') ?> <?php $this->admin__show_help_link('already_commented') ?>
+              </label>
+            </td>
+          </tr>-->
+          <!--<tr>
+            <td>
+              <label for="antispam_bee_always_allowed">
+              <input type="checkbox" name="antispam_bee_always_allowed" id="antispam_bee_always_allowed" value="1" <?php checked($this->func__get_plugin_option('always_allowed'), 1) ?> />
+              <?php _e('Comments are also used outside of posts and pages', 'antispam_bee') ?> <?php $this->admin__show_help_link('always_allowed') ?>
+              </label>
+            </td>
+          </tr>-->
+          <tr>
+            <td>
+              <label for="trash_banned">
+              <input type="checkbox" name="trash_banned" id="trash_banned" value="1" <?php checked($this->func__get_plugin_option('trash_banned'), 1) ?> />
+              <?php _e('Trash banned (blacklisted) comments, don\'t just mark them as spam', 'antispam_bee') ?>
+              </label>
+            </td>
+          </tr>
+          <tr>
+            <td>
+              <label for="spam_registrations">
+              <input type="checkbox" name="spam_registrations" id="spam_registrations" value="1" <?php checked($this->func__get_plugin_option('spam_registrations'), 1) ?> />
+              <?php _e('Protect the registration form', 'antispam_bee') ?>
+              </label>
+            </td>
+          </tr>        
+          <tr>
+            <td>
+              <label for="cronjob_enable">
+              <input type="checkbox" name="cronjob_enable" id="cronjob_enable" value="1" <?php checked($this->func__get_plugin_option('cronjob_enable'), 1) ?> />
+              Keep maximum of 20,000 trash spam comments (<abbr title="This will keep comments trashed by hand - having _wp_trash_meta_time meta">?</abbr>)
+              </label>
+            </td>
+          </tr>
+         
+        </table>
+      </div>
+    <?php
+  }  
+  
+  
+  
+  
+  function disp__admin_filled_in() {
+    
+    $sCollisionCheck = '';
+    $problems = get_option( 'fv_antispam_filledin_conflict' );
+    if( $problems ) {
+      $sCollisionCheck = $this->admin__filled_in_collision_check( true );
+    }
+    else if( $problems === false ) {
+      $sCollisionCheck= $this->admin__filled_in_collision_check( true );
+    } else {
+      $sCollisionCheck = " (No conflicts with Filled In detected with your current field name)!";
+    }
+      
+    if( $this->util__is_filled_in() ) :                    
+    ?>
+    <div class="inside">
+                  <table class="form-table">
+                    <tr>
+                      <td>
+                        <h3>Basic antispam</h3>
+                        <?php if( function_exists('akismet_get_key') && akismet_get_key() ) : ?>                        
+                          <br /><span class="description"><?php _e('Akismet detected - FV Antispam will use it to protect the forms.', 'antispam_bee') ?></span>
+                        <?php else : ?>
+                          <br /><span class="description"><?php _e('We recommend that you install Akismet for increased protection.', 'antispam_bee') ?></span>
+                        <?php endif; ?>         
+                       
+                      </td>
+                    </tr>
+                    <tr>
+                      <td>
+                        <label for="protect_filledin">
+                        <input type="checkbox" name="protect_filledin" id="protect_filledin" value="1" <?php checked($this->func__get_plugin_option('protect_filledin'), 1) ?> />
+                        <?php _e('Protect Filled in forms', 'antispam_bee') ?>                  
+                        </label>
+                      </td>
+                    </tr>
+                    <tr>
+                      <td>
+                      Enter fake field name<br />
+                        <label for="protect_filledin_field">
+                        <input type="text" class="regular-text" name="protect_filledin_field" id="protect_filledin_field" value="<?php if( function_exists( 'esc_attr' ) ) echo esc_attr( $this->func__get_plugin_option('protect_filledin_field') ); else echo ( $this->func__get_plugin_option('protect_filledin_field') ); ?>" />
+                        <span class="description"><?php _e('Leave empty if you want to use the default'.$sCollisionCheck, 'antispam_bee') ?> <?php $this->admin__show_help_link('protect_filledin_field') ?></span>
+                        </label>
+                      </td>
+                    </tr>
+                    <tr>
+                      <td>
+                      Enter spam message<br />
+                        <label for="protect_filledin_notice">
+                        <input type="text" class="regular-text" name="protect_filledin_notice" id="protect_filledin_notice" value="<?php if( function_exists( 'esc_attr' ) ) echo esc_attr( $this->func__get_plugin_option('protect_filledin_notice') ); else echo ( $this->func__get_plugin_option('protect_filledin_notice') ); ?>" />
+                        <span class="description"><?php _e('This is a failsafe if a real person is caught as spam', 'antispam_bee') ?> <?php $this->admin__show_help_link('protect_filledin_notice') ?></span>
+                        </label>
+                      </td>
+                    </tr>                          
+                    <tr>
+                      <td>
+                        <label for="protect_filledin_disable_notice">
+                        <input type="checkbox" name="protect_filledin_disable_notice" id="protect_filledin_disable_notice" value="1" <?php checked($this->func__get_plugin_option('protect_filledin_disable_notice'), 1) ?> />
+                        <?php _e('Disable protection notice', 'antispam_bee') ?> <span class="description"><?php _e('(Logged in administrators normally see a notice that FV Antispam is protecting a Filled in form)', 'antispam_bee') ?></span>
+                        </label>
+                      </td>
+                    </tr>                     
+                    
+                    <tr><td><h3>Custom questions</h3><br ><span class="description"><?php _e('If some forms still have problem with spam, customize and enable the custom questions.', 'antispam_bee') ?></span></td></tr>
+                    <tr>
+                      <td>
+                      Use custom question on forms:                        
+<?php
+
+global $wpdb;
+$sTableName = $wpdb->prefix.'filled_in_forms';
+if( $wpdb->get_var("SHOW TABLES LIKE '$sTableName'") == $sTableName && $aForms = $wpdb->get_results( "SELECT * FROM {$wpdb->prefix}filled_in_forms ORDER BY name ASC" ) ) {		
+
+	$sFilledInJs = $this->func__get_plugin_option('filled_in_custom');
+	$aSelectedForms = array();
+	if( $sFilledInJs && strlen($sFilledInJs) > 0 && $aFilledInJs = explode( ';', $sFilledInJs ) ) {
+		if( count($aFilledInJs) > 0 ) {
+			foreach( $aFilledInJs AS $sFilledInJs ) {
+				$aFilledInJs = explode( ',', $sFilledInJs );
+				if( $aFilledInJs && count( $aFilledInJs ) ) {
+					foreach( $aForms AS $key => $aForm ) {
+						if( $aForm->id == $aFilledInJs[1] ) {
+							$aForms[$key]->selected = true;
+							$aSelectedForms[] = '<code>'.$aForm->name.'</code>';
+						}
+					}
+				}
+			}		
+		}
+	}
+	
+	$iSelectedForms = count( $aSelectedForms );
+	$sSelectedForms = implode( ' ', $aSelectedForms );
+  
+	$sFilledInSpecials = $this->func__get_plugin_option('filled_in_specials');
+	$aSelectedFormsSpecials = array();
+	if( $sFilledInSpecials && strlen($sFilledInSpecials) > 0 && $aFilledInSpecials = explode( ';', $sFilledInSpecials ) ) {
+		if( count($aFilledInSpecials) > 0 ) {
+			foreach( $aFilledInSpecials AS $sFilledInSpecial ) {
+				$aFilledInSpecial = explode( ',', $sFilledInSpecial );
+				if( $aFilledInSpecial && count( $aFilledInSpecial ) ) {
+					foreach( $aForms AS $key => $aForm ) {
+						if( $aForm->id == $aFilledInSpecial[1] ) {
+							$aForms[$key]->selectedSpecial = true;
+							$aSelectedFormsSpecials[] = $aForm->name;
+						}
+					}
+				}
+			}		
+		}
+	}  
+ 
+	if( $iSelectedForms > 0 ) {          
+		echo $sSelectedForms;
+	} else {
+    echo '(none selected)';
+  }
+	echo ' (<a href="#" onclick="jQuery(\'.fv-antispam-list-forms-2\').toggle(); return false">toggle</a>) ';	
+	?>
+	<table class="fv-antispam-list-forms-2 wp-list-table widefat fixed posts" style="display: none; margin-top: 10px">
+    <thead>
+      <tr>
+        <th class="manage-column column-title sortable"><a>Form</a></th><th class="manage-column column-title sortable"><a>Use custom question</a></th><th class="manage-column column-title sortable"><a>Show in popup</a></th>
+      </tr>
+    </thead>
+    <tbody id="the-list">
+	<?php
+  $iCount = 0;
+  foreach( $aForms AS $key => $aForm ) {
+    $class = ($iCount % 2 == 0 ) ? ' class="alt"' : '';
+    $iCount++;
+    echo '<tr'.$class.'>';
+		echo '<td><label for="filled_in_custom-'.$key.'">'.$aForm->name.'</label> <small>(<a style="text-decoration: none; " target="_blank" href="'.site_url().'/wp-admin/tools.php?page=filled_in.php&edit='.$aForm->id.'">edit</a>)</small></td>';
+		echo '<td><input id="filled_in_custom-'.$key.'" name="filled_in_custom[]" value="'.$aForm->name.','.$aForm->id.'" type="checkbox" '.( isset($aForm->selected) && $aForm->selected ? ' checked="checked" ' : '' ).'/></td>';
+    echo '<td><input id="filled_in_specials-'.$key.'" name="filled_in_specials[]" value="'.$aForm->name.','.$aForm->id.'" type="checkbox" '.( isset($aForm->selectedSpecial) && $aForm->selectedSpecial ? ' checked="checked" ' : '' ).'/></td>';
+    echo '</tr>'."\n";
+	}
+	echo '</table>'."\n";
+} else {
+	echo 'Strange, no Filled in database tables found!';
+} ?>
+    </tbody>
+  </table>
+                      </td>
+                    </tr>
+
+                    
+                    <tr>
+                      <td>
+                      	Custom questions <a id="fv-antispam-question-add"><small>Add more</small></a><br />
+                        <div id="fv-antispam-questions">
+                          <?php
+                          $aQuestions = explode( "\n", $this->func__get_plugin_option('questions') );
+                          
+                          foreach( $aQuestions AS $aQuestion ) {
+                            list( $sAnswer, $sQuestion ) = explode( ",", strrev($aQuestion), 2 );
+                            $sQuestion = strrev($sQuestion);
+                            $sAnswer = strrev($sAnswer);
+                            ?>
+                            <p><input type="text" value="<?php echo esc_attr($sQuestion); ?>" name="question[]" class="regular-text" /> <input type="text" value="<?php echo esc_attr($sAnswer); ?>" name="answer[]" /> <input type="button" value="Remove" class="button fv-antispam-question-remove" /></p>
+                            <?php
+                          }                 
+                          ?>
+                          <p class="template"><input type="text" value="" name="question[]" class="regular-text" /> <input type="text" value="" name="answer[]" /> <input type="button" value="Remove" class="button fv-antispam-question-remove" /></p>
+                        </div>
+                        <style>
+                          #fv-antispam-questions .button { display: none; }
+                          #fv-antispam-questions .template { display: none; }
+                        </style>
+                        <script>
+                          function fv_antispam_settings_js() {
+                            jQuery('#fv-antispam-questions p').hover(
+                              function() {
+                                jQuery(this).find('.button').show();
+                              }, function() {
+                                jQuery(this).find('.button').hide();
+                              }
+                            );
+                            jQuery('.fv-antispam-question-remove').click( function() {
+                              jQuery(this).parent().remove();
+                            } );
+                          }
+                          jQuery(document).ready( function() {
+                            fv_antispam_settings_js();
+                            jQuery('#fv-antispam-question-add').click( function() {
+                              jQuery('#fv-antispam-questions').append( '<p>'+jQuery('#fv-antispam-questions .template').html()+'</p>' );
+                              fv_antispam_settings_js();
+                            } );
+                            
+                          } );
+                        </script>
+                      </td>
+                    </tr>
+                    
+                  </table>
+                </div>
+    <?php else : ?>
+      <p>Filled in not installed.</p>
+    <?php endif;
+  }
+  
+  
+  
+  
   function disp__faq_tastic_js() {
   	global $post;
   	$protect = FV_Antispam::func__protect($post->ID);
@@ -727,6 +939,8 @@ class FV_Antispam extends FV_Antispam_Plugin {
   
   
   function disp__footer_scripts() {	//	some templates (Elegant Themes Chameleon) mess up the input fields, so we also reset the #comment textarea here
+    global $FV_Antispam_bMathJS;
+    if( $FV_Antispam_bMathJS ) :
   	?>
 <script type="text/javascript">
 function fvaq() {
@@ -740,21 +954,59 @@ function fvaq() {
 		
 		for (var i = 0; i < fvaq.length; ++i) { 		
 			if( fvaa[i] !== undefined && fval[i] !== undefined ) {
-				fvaq[i].value = fvaa[i].value;
-				fvaq[i].style.display = 'none';
-				fval[i].style.display = 'none';		
+				fvaq[i].value = fvaa[i].value; fvaq[i].style.display = 'none'; fval[i].style.display = 'none';		
 			}
 		}
 	}
-	if( document.getElementById('comment') != null ) {
-		document.getElementById('comment').value = '';
+	if( document.getElementById('comment') != null ) { document.getElementById('comment').value = ''; }
+}
+fvaq(); window.onload = function(e) { fvaq(); setTimeout('fvaq', 250); };
+</script>
+<?php
+    endif;  //  $FV_Antispam_bMathJS
+
+$bShowScripts = false;
+$sScript = '';
+$sFilledInSpecials = $this->func__get_plugin_option('filled_in_specials');
+if( $sFilledInSpecials && strlen($sFilledInSpecials) > 0 && $aFilledInSpecials = explode( ';', $sFilledInSpecials ) ) {
+	if( count($aFilledInSpecials) > 0 ) {
+		foreach( $aFilledInSpecials AS $sFilledInSpecial ) {
+			$aFilledInSpecial = explode( ',', $sFilledInSpecial );
+			if( $aFilledInSpecial && count( $aFilledInSpecial ) == 2 ) {
+				$sScript .= "fvacq('$aFilledInSpecial[0]','$aFilledInSpecial[1]'); ";
+				$bShowScripts = true;
+			}
+		}
 	}
 }
-fvaq();
 
-window.onload = function(e) { fvaq(); setTimeout('fvaq', 250); };
+if( $bShowScripts ) : ?>
+<script type="text/javascript">
+function fvacq( form_name, form_id ) {
+	if( (form = document.getElementById(form_name)) != null ) {
+		form.onsubmit = function() {
+			if (document.getElementById("fvacq"+form_id).style.display == "none") {
+				document.getElementById("fvacq"+form_id).style.display = 'block';
+				return false;
+			}
+			return true;
+		} 
+	}
+}
+<?php echo $sScript; ?>
 </script>
+<?php endif; ?>
+
   	<?php
+  }
+  
+  
+  
+  
+  function disp__head_css() {
+    if( !FV_Antispam::func__get_plugin_option('my_own_styling') ) {
+      echo "<style>form .message-textarea {display: none !important; }</style>\n";
+    }
   }
   
   
@@ -767,7 +1019,7 @@ window.onload = function(e) { fvaq(); setTimeout('fvaq', 250); };
       $html = preg_replace("~(<\/h1>)\s*?(.*?)\s*?(<form)~", '$1$2' . $protection_notice . '$3', $html);
     }
     
-    if( $_GET['action'] == 'register' ) {
+    if( isset($_GET['action']) && $_GET['action'] == 'register' ) {
     	$protect = $this->func__ip_protect();
     	$html .= $this->disp__math_question($protect);
     }
@@ -782,23 +1034,72 @@ window.onload = function(e) { fvaq(); setTimeout('fvaq', 250); };
     ?>
 <script type="text/javascript">    
   jQuery(document).ready(function() {
-    jQuery("#user_email").hide();
-    var hash = '<?php echo $this->func__ip_protect(); ?>';    
-    var value = '<?php echo $_POST[$this->func__ip_protect()]; ?>'; 
-    jQuery("#user_email").parent("label").append("<input class='input' type='text' name='" + hash + "' id='" + hash + "' value='" + value + "' size='25' tabindex='21'>");      
+		jQuery( '#user_email').after(
+			jQuery("#user_email").clone().attr('id', '<?php echo $this->func__ip_protect(); ?>').attr('name', '<?php echo $this->func__ip_protect(); ?>').attr('value', '<?php echo $_POST[$this->func__ip_protect()]; ?>')
+		);
+    jQuery("#user_email").hide();    
   })      
 </script>      
     <?php
   }  
+
+
+
+  /*
+   * Puts in custom question
+   *
+   * @param string $protect Used for field id and name
+   * @param int $form_id Form ID
+   * @param bool $bFilledInSpecial Wether the form uses JavaScript to show the custom question - for "small" or single line forms
+   * $param string $sFormHTML Optional full form HTML. If specified, the function alters the form HTML directly.
+   * @return string $html The custom question fields HTML or form HTML with custom question fields in it
+   */
+  function disp__custom_question($protect, $form_id, $bFilledInSpecial = false, $sFormHTML = false ) {
+
+  	if( $sQuestions = $this->func__get_plugin_option('questions') ) {
+      global $FV_Antispam_iFilledInCount;
+      
+  		$aQuestions = explode( "\n", $sQuestions);
+
+  		if( !$aQuestions ) {
+  			return false;
+  		}
+  		
+  		$iRandom = rand(0,count($aQuestions)-1);
+  		$sQuestion = $aQuestions[$iRandom];
+  		list( $sAnswer, $sQuestion ) = explode( ",", strrev($sQuestion), 2 );
+      $sQuestion = strrev( $sQuestion );
+
+      if( $sFormHTML && !$bFilledInSpecial ) {
+        $html = str_replace( '[fvquestion]', "<label class='fvacl' for='c_".$protect.$FV_Antispam_iFilledInCount."'>".$br.__($sQuestion)."</label>", $sFormHTML );
+        $html = str_replace( '[fvanswer]', "<input class='fvacq' type='text' id='c_".$protect.$FV_Antispam_iFilledInCount."' name='c_".$protect."' size='5' /><input class='fvaca' type='hidden' name='ca_".$protect."' value='".$iRandom."' />", $html );
+      } else {
+        $br = false;
+        if( $bFilledInSpecial ) {
+          $br = '<br />';
+        }           
+        $html = "\n<span><label class='fvacl' for='c_".$protect.$FV_Antispam_iFilledInCount."'>".$br.__($sQuestion)."</label></span> <input class='fvacq' type='text' id='c_".$protect.$FV_Antispam_iFilledInCount."' name='c_".$protect."' size='5' /><input class='fvaca' type='hidden' name='ca_".$protect."' value='".$iRandom."' />\n";    	
+              
+        if( $bFilledInSpecial ) {
+          $html = "<div id='fvacq$form_id' class='fvacq_wrap' style='display: none'>$html</div>\n";	//	todo: inline style - not so good!
+        }
+      }
+  	}		
+
+  	return $html;
+  }
   
   
   
   
   function disp__math_question($protect) {
+    global $FV_Antispam_iFilledInCount, $FV_Antispam_bMathJS;
+    $FV_Antispam_bMathJS = true;
+    
 		$iA = rand(1,5);	
 		$iB = rand(1,5);
 			
-		$html .= "\n<span><label class='fval' for='m_".$protect."'><br />".__('How much is')." $iA + $iB?</label></span> <input class='fvaq' type='text' id='m_".$protect."' name='m_".$protect."' size='2' /><input class='fvaa' type='hidden' name='ma_".$protect."' value='".($iA+$iB)."' />\n";  
+		$html .= "\n<span><label class='fval' for='m_".$protect.$FV_Antispam_iFilledInCount."'><br />".__('How much is')." $iA + $iB?</label></span> <input class='fvaq' type='text' id='m_".$protect.$FV_Antispam_iFilledInCount."' name='m_".$protect."' size='2' /><input class='fvaa' type='hidden' name='ma_".$protect."' value='".($iA+$iB)."' />\n";  
   	return $html;
   }
   
@@ -813,35 +1114,87 @@ window.onload = function(e) { fvaq(); setTimeout('fvaq', 250); };
     * @return string Content with fake field added.
     */    
   function disp__the_content( $content ) {
+    global $FV_Antispam_iFilledInCount;
+    
     if( stripos( $content, '<input type="hidden" name="filled_in_form" ' ) === FALSE ) {  //  first check if there's any filled in form
       return $content;
     }
     preg_match_all( '~<form[\s\S]*?</form>~', $content, $forms );
     
     foreach( $forms[0] AS $form ) {
+      $form_protected = $form;
       
+      $FV_Antispam_iFilledInCount++;
       if( current_user_can('manage_options') && !$this->func__get_plugin_option('protect_filledin_disable_notice') ) {
-        $protection_notice = '<p><small>(Note for WP Admins: Form Protected by <a href="http://foliovision.com/seo-tools/wordpress/plugins/fv-antispam/filled-in-protection">FV Antispam</a>)</small></p>';
-      }
+        $protection_notice = '<p><small>(Note for WP Admins: Form Protected by <a href="http://foliovision.com/seo-tools/wordpress/plugins/fv-antispam/filled-in-protection">FV Antispam</a>, test logged out!)</small></p>';
+      }      
       
-      if( !FV_Antispam::func__get_plugin_option('my_own_styling') ) {
-
-        $css = '#'.$this->func__get_filled_in_fake_field_name().' { display: none; } ';
-
-        $css = '<style>'.$css.'</style>';
-      }
-      
-      
-      
+      global $post;
       $protect = FV_Antispam::func__protect($post->ID);
-			$math = $this->disp__math_question($protect);
-			
-			
+
+			$form_id = false;
+			preg_match( '~<input type="hidden" name="filled_in_form" value="(\d+)"/>~', $form, $form_id );
+			if( intval($form_id) > 0 ) {
+				$form_id = $form_id[1];
+			}
       
-      $form_protected = preg_replace( '~(<form[\s\S]*?)(<input type="hidden" name="filled_in_form" value="\d+"/>)([\s\S]*?)(<[^<]*?submit)([\s\S]*?</form>)~', $protection_notice.'$1$2$3<textarea id="'.$this->func__get_filled_in_fake_field_name().'" name="'.$this->func__get_filled_in_fake_field_name().'" rows="12" cols="40"></textarea>'.$css."\n".$math.'$4$5', $form );
+      $sAntispamFields = false;
+      if( !is_user_logged_in() || 1>0 ) { //  if we only do the change when logged out, the HTML with [fvquestion] and [fvanswer] stays!
+        global $post; //  global variable which you can set to true to use the Math JS protection
+        
+        $bFilledInCustom = false;
+        $sFilledInJs = $this->func__get_plugin_option('filled_in_custom');
+        if( $sFilledInJs && strlen($sFilledInJs) > 0 && $aFilledInJs = explode( ';', $sFilledInJs ) ) {
+          if( count($aFilledInJs) > 0 ) {
+            foreach( $aFilledInJs AS $sFilledInJs ) {
+              $aFilledInJs = explode( ',', $sFilledInJs );
+              if( $aFilledInJs && count( $aFilledInJs ) == 2 && $aFilledInJs[1] == $form_id ) {
+                $bFilledInCustom = true;
+              }
+            }
+          }
+        }
+        
+        $bFilledInSpecial = false;
+        $sFilledInSpecials = $this->func__get_plugin_option('filled_in_specials');
+        if( $sFilledInSpecials && strlen($sFilledInSpecials) > 0 && $aFilledInSpecials = explode( ';', $sFilledInSpecials ) ) {
+          if( count($aFilledInSpecials) > 0 ) {
+            foreach( $aFilledInSpecials AS $sFilledInSpecial ) {
+              $aFilledInSpecial = explode( ',', $sFilledInSpecial );
+              if( $aFilledInSpecial && count( $aFilledInSpecial ) == 2 && $aFilledInSpecial[1] == $form_id ) {
+                $bFilledInSpecial = true;
+              }
+            }
+          }
+        }           
+                
+
+        if( $bFilledInCustom ) {  //  yes, we want custom questions
+          if( !$bFilledInSpecial && stripos($form, '[fvquestion]') !== false && stripos($form, '[fvanswer]') !== false ) {  //  the form is not marked to use javascript popup and it's using shortcodes for question and answer
+            $form_protected = $this->disp__custom_question($protect, $form_id, $bFilledInSpecial, $form_protected);          
+          } else {  //  
+            $form_protected = str_replace( array('[fvquestion]','[fvanswer]'), '', $form_protected );
+            $sAntispamFields = $this->disp__custom_question($protect, $form_id, $bFilledInSpecial);          
+          }          
+        } else {
+          $sAntispamFields = $this->disp__math_question($protect);
+          $form_protected = str_replace( array('[fvquestion]','[fvanswer]'), '', $form_protected );          
+        }
+      }
+    
+      $sCount = ( $FV_Antispam_iFilledInCount == 1 && strcasecmp($this->func__get_filled_in_fake_field_name(),'comment') !== 0 ) ? '' : '-'.$FV_Antispam_iFilledInCount;     
+           
+      $form_protected = preg_replace( '~(<form[\s\S]*?)(<input type="hidden" name="filled_in_form" value="\d+"/>)([\s\S]*?)(<[^<]*?[\'"]submit[\'"])([\s\S]*?</form>)~', $protection_notice.'$1$2$3<textarea id="'.$this->func__get_filled_in_fake_field_name().$sCount.'" class="message-textarea" name="'.$this->func__get_filled_in_fake_field_name().'" rows="12" cols="40"></textarea>'."\n".$sAntispamFields.'$4$5', $form_protected );
       $content = str_replace( $form, $form_protected, $content );
     }
-
+    
+    if( is_user_logged_in() && 1<0 ) {
+      if( stripos($form, '[fvquestion]') !== false && stripos($form, '[fvanswer]') !== false ) {
+        $content = str_replace('[fvquestion]','',$content);
+        $content = str_replace('[fvanswer]','',$content);
+      }
+    }
+    
     return $content;
   }  
   
@@ -894,7 +1247,9 @@ window.onload = function(e) { fvaq(); setTimeout('fvaq', 250); };
 	
 	
 	
-	function func__check_math( $aComment ) {
+	function func__check_math( $aComment ) {    
+    return $aComment; //  disable comment JS checking
+    
 		if( is_user_logged_in() ) {
 			return $aComment;
 		}
@@ -927,8 +1282,9 @@ window.onload = function(e) { fvaq(); setTimeout('fvaq', 250); };
 	
   function func__faq_tastic_spam_protection($content) {
   
-  	if( strpos( $content, '<textarea name="faq_question"' ) !== false ) {
-  		global $post;
+  	if( strpos( $content, '<textarea name="faq_question"' ) !== false ) {      
+  		global $post, $FV_Antispam_iFilledInCount;
+      $FV_Antispam_iFilledInCount++;
   		$protect = FV_Antispam::func__protect($post->ID);
   		$content = preg_replace( '~(<form[^>]*?add-question.php[\s\S]*?)(<input[^>]*?type="submit)~', '$1'.$this->disp__math_question($protect).'$2', $content );
   		
@@ -946,7 +1302,7 @@ window.onload = function(e) { fvaq(); setTimeout('fvaq', 250); };
     	
     	$protect = FV_Antispam::func__protect($post->ID);
     	
-    	if( isset($_POST['m_'.$protect]) && isset($_POST['ma_'.$protect]) && $_POST['m_'.$protect] == $_POST['ma_'.$protect] ) {
+    	if( isset($_POST['m_'.$protect]) && isset($_POST['ma_'.$protect]) && $_POST['m_'.$protect] == $_POST['ma_'.$protect] ) {	//	todo
     		if( trim($_POST['faq_question'])  == '' ) {
     			$_POST['faq_question'] = $_POST[$protect];  
     		}
@@ -973,33 +1329,71 @@ window.onload = function(e) { fvaq(); setTimeout('fvaq', 250); };
     * 
     */    
   function func__filled_in_check() {
-  	if( isset($_POST['filled_in_form']) ) {
-  		$iForm_id = $_POST['filled_in_form'];
-  	}
+  	$iForm_id = ( isset($_POST['filled_in_form']) ) ? intval($_POST['filled_in_form']) : -1;
+    
+    if( is_user_logged_in() ) {
+      return;      
+    }
   	
   	global $post;
   	$protect = FV_Antispam::func__protect($post->ID);
+  	
+  	$bCustomQuestion = false;
+		if( isset($_POST['ca_'.$protect]) && isset($_POST['c_'.$protect]) ) {	//	custom question		
+			if( $sQuestions = $this->func__get_plugin_option('questions') ) {
+  			$aQuestions = explode( "\n", $sQuestions);  			
+  		}
+      
+      if( count($aQuestions) ) {   		
+        $iAnswer = intval($_POST['ca_'.$protect]);
+        
+        $sQuestion = $aQuestions[$iAnswer];
+        list( $sAnswer, $sQuestion ) = explode( ",", strrev($sQuestion), 2 );
+        $sAnswer = strrev($sAnswer);
   
+        $iLevenshtein = levenshtein( trim($sAnswer), trim($_POST['c_'.$protect]) );
+        if( $iAnswer > count( $aQuestions ) ) {
+          $bCustomQuestion = false;  		  		
+        } else if( $iLevenshtein >= 0 && $iLevenshtein <= floor(strlen(trim($sAnswer))/2) ) { //  ...so if there is 1 char answer, levenshtein will be merciless!
+          $bCustomQuestion = true;  //  this overrides any other check
+        }
+      }
+  	}
+    
+    $bSkipJSCheck = false;  //  skip JS check on Ajax forms
+    if( $iForm_id > 0 ) {
+      global $wpdb;
+      $aOptions = $wpdb->get_var( "SELECT options FROM {$wpdb->prefix}filled_in_forms WHERE id = '".esc_sql($iForm_id)."' LIMIT 1" );
+      $aOptions = unserialize($aOptions);
+      if( isset($aOptions['ajax']) && $aOptions['ajax'] == "true" ) {
+        $bSkipJSCheck = true;
+      }
+    }
+
     if(
     	isset( $_POST[$this->func__get_filled_in_fake_field_name()] ) && strlen( $_POST[$this->func__get_filled_in_fake_field_name()] )
-			&& ( isset($_POST['m_'.$protect]) && isset($_POST['ma_'.$protect]) && $_POST['m_'.$protect] != $_POST['ma_'.$protect] )
-    ) {
-			setcookie( 'fvaq_nojs', 1, time()+120 );    
+			&& ( isset($_POST['m_'.$protect]) && isset($_POST['ma_'.$protect]) && $_POST['m_'.$protect] != $_POST['ma_'.$protect] && !$bCustomQuestion )
+    ) {	//	fake field filled in, math question present and bad answer
+			setcookie( 'fvaq_nojs', 1, time()+120 );
       $this->func__set_filled_in_fail($iForm_id );      
-    } else if(
-			!isset($_POST['m_'.$protect]) ||
-			( isset($_POST['m_'.$protect]) && intval($_POST['m_'.$protect]) == 0 )
-		) {
-			setcookie( 'fvaq_nojs', 1, time()+120 );
+    } else if( 
+			(
+				!isset($_POST['m_'.$protect]) ||
+				( isset($_POST['m_'.$protect]) && intval($_POST['m_'.$protect]) == 0 )
+			) && !isset($_POST['c_'.$protect]) && !$bCustomQuestion && !$bSkipJSCheck
+		) {	//	no math question and no custom question
+			setcookie( 'fvaq_nojs', 1, time()+120 ); 
 			$this->func__set_filled_in_fail($iForm_id);
-		} else if( $_POST['m_'.$protect] != $_POST['ma_'.$protect] ) {
-			setcookie( 'fvaq_nojs', 1, time()+120 );
+		} else if( !$bSkipJSCheck && !$bCustomQuestion && $_POST['m_'.$protect] != $_POST['ma_'.$protect] ) {	//	bad math answer	
+			setcookie( 'fvaq_nojs', 1, time()+120 );  
+			$this->func__set_filled_in_fail($iForm_id);
+		} else if( !$bSkipJSCheck && !$bCustomQuestion && ( !isset($_POST['m_'.$protect]) || !isset($_POST['ma_'.$protect]) ) ) {	//	no custom question, but no math answer either!
 			$this->func__set_filled_in_fail($iForm_id);
 		} else if( function_exists('akismet_http_post') ) {
 		
 			$c = array();
-			$c['user_ip']    = ( $_GET['ip'] ) ? $_GET['ip'] : $_SERVER['REMOTE_ADDR'];			
-			$c['user_agent'] = ( $_GET['ua'] ) ? $_GET['ua'] : $_SERVER['HTTP_USER_AGENT'];
+			$c['user_ip']    = ( isset($_GET['ip']) ) ? $_GET['ip'] : $_SERVER['REMOTE_ADDR'];			
+			$c['user_agent'] = ( isset($_GET['ua']) ) ? $_GET['ua'] : $_SERVER['HTTP_USER_AGENT'];
 			$c['referrer']   = $_SERVER['HTTP_REFERER'];
 			$c['blog']       = get_option('home');
 			$c['blog_lang']  = get_locale();
@@ -1027,11 +1421,11 @@ window.onload = function(e) { fvaq(); setTimeout('fvaq', 250); };
       $akismet_api_port = 80;			
       
 		
-			///file_put_contents( dirname(__FILE__)."/filled-in-mv.log", date('r')." query:\n".var_export($c,true)."\n", FILE_APPEND );
+			//file_put_contents( dirname(__FILE__)."/filled-in-mv.log", date('r')." query:\n".var_export($c,true)."\n", FILE_APPEND );
 		
 			$response = akismet_http_post($query_string, $akismet_api_host, '/1.1/comment-check', $akismet_api_port);
 
-			///file_put_contents( dirname(__FILE__)."/filled-in-mv.log", date('r')." response:\n".var_export($response,true)."\n\n", FILE_APPEND );								
+			//file_put_contents( dirname(__FILE__)."/filled-in-mv.log", date('r')." response:\n".var_export($response,true)."\n\n", FILE_APPEND );								
 			
 			if( $response[1] == 'true' ) {
 				//setcookie( 'fvaq_nojs', 1, time()+120 );
@@ -1039,7 +1433,6 @@ window.onload = function(e) { fvaq(); setTimeout('fvaq', 250); };
 			}
 			
 		}			
-		
   }	
   
   
@@ -1182,9 +1575,15 @@ window.onload = function(e) { fvaq(); setTimeout('fvaq', 250); };
   
   
   
-  
+  function func__login_scripts() {
+		wp_enqueue_script( 'jquery' );		
+	}
+	
+	
+	
+	
   function func__precheck_comment_request() { ///  detect spam here
-    if (is_feed() || is_trackback() || FV_Antispam::util__is_wp_touch()) {
+    if( is_feed() || is_trackback() || FV_Antispam::util__is_wp_touch() || FV_Antispam::util__is_jetpack_comments() ) {
       return;
     }
     $request_url = @$_SERVER['REQUEST_URI'];
@@ -1226,7 +1625,7 @@ window.onload = function(e) { fvaq(); setTimeout('fvaq', 250); };
     * 
     */ 
   function func__replace_comment_field() {
-    if( is_feed() || is_trackback() || $this->util__is_wp_touch() ) {
+    if( is_feed() || is_trackback() || $this->util__is_wp_touch() || $this->util__is_jetpack_comments() ) {
       return;
     }
     if( !is_singular() ) {
@@ -1236,7 +1635,7 @@ window.onload = function(e) { fvaq(); setTimeout('fvaq', 250); };
     ob_start(
       create_function(
       '$input',
-      'return preg_replace_callback("#wp-comments-post.php\".*?(<textarea.*?(class=\".*?\")?.*?</textarea>)#s", "FV_Antispam::func__replace_textarea" , $input);'
+      'return preg_replace_callback("#wp-comments-post.php\".*?(<textarea.*?name=[\'\"]comment[\'\"].*?</textarea>)#s", "FV_Antispam::func__replace_textarea" , $input);'
       )
     );
   }
@@ -1261,44 +1660,44 @@ window.onload = function(e) { fvaq(); setTimeout('fvaq', 250); };
     * 
     * @return string New page content.
     */    
-  static function func__replace_textarea( $match ) {
-    global $post;
+  static function func__replace_textarea( $aMatch ) {
+    global $post, $FV_Antispam_iFilledInCount;
 
-    preg_match( '/class=[\"\'](.*?)[\"\']/', $match[1], $class );
-    preg_match( '/id=[\"\'](.*?)[\"\']/', $match[1], $id );
-    preg_match( '/name=[\"\'](.*?)[\"\']/', $match[1], $name );
+    $sForm = $aMatch[0];
+    $sTextarea = $aMatch[1];
+  
+    preg_match( '/class=[\"\'](.*?)[\"\']/', $sTextarea, $class );
+    preg_match( '/id=[\"\'](.*?)[\"\']/', $sTextarea, $id );
+    preg_match( '/name=[\"\'](.*?)[\"\']/', $sTextarea, $name );
 
-    $class = $class[1];
-    $id = $id[1];
-    $name = $name[1];
+    $sClass = $class[1];
+    $sID = $id[1];
+    $sName = $name[1];
+
+    $sTextarea = preg_replace('~<textarea([^\>]*>).*?</textarea>~', "<textarea$1</textarea>", $sTextarea ); // have to keep the hidden textarea empty
     
-    if( !FV_Antispam::func__get_plugin_option('my_own_styling') ) {
-      $css = '';
-      if( $class != '' ) {
-        //  this is no good for some templates
-        //$css .= '.'.$class.' { display: none; } ';
-      }
-      if( $id != '' ) {
-        $css .= '#'.$id.' { display: none !important; } ';
-      }
-      
-      $css = '<style>'.$css.'</style>';
+    $sProtect = FV_Antispam::func__protect($post->ID);
+    
+    $sTextareaNew = preg_replace( '/id=[\'"]'.$sID.'[\'"]/i', 'id="'.$sProtect.'"', $sTextarea );
+    $sTextareaNew = preg_replace( '/name=[\'"]'.$sName.'[\'"]/i', 'name="'.$sProtect.'"', $sTextareaNew );
+        
+    if( !$sClass ) {
+      $sTextarea = str_replace( 'id="comment"', 'id="comment" class="message-textarea"', $sTextarea );
+      $sTextarea = str_replace( "id='comment'", "id='comment' class='message-textarea'", $sTextarea );
+    } else {
+      $sTextarea = str_replace( 'class="', 'class="message-textarea ', $sTextarea );
+      $sTextarea = str_replace( "class='", "class='message-textarea ", $sTextarea );
+    }    
+    
+    if( !is_user_logged_in() && 1<0 ) { //  no math question for comment submissions!
+      $FV_Antispam_iFilledInCount++;
+			$sTextareaNew .= FV_Antispam::disp__math_question($sProtect);
     }
     
-    $protect = FV_Antispam::func__protect($post->ID);
+    $sForm = preg_replace('~<textarea([^\>]*name=[\'\"]comment[\'\"][^\>]*>).*?</textarea>~', $sTextarea, $sForm ); // put in the adjusted textarea
+    $sForm = preg_replace('~(class=[\'"][^\'"]*?)required([^\'"]*?[\'"])~', "$1$2", $sForm);   // gotta get rid of class="required"
     
-    $new = preg_replace( '/id=[\'"]'.$id.'[\'"]/i', 'id="'.$protect.'"', $match[1] );
-    $new = preg_replace( '/name=[\'"]'.$name.'[\'"]/i', 'name="'.$protect.'"', $new );
-    $new = preg_replace( '/name=[\'"]'.$name.'[\'"]/i', 'name="'.$protect.'"', $new );
-    
-    if( !is_user_logged_in() ) {
-			$new .= FV_Antispam::disp__math_question($protect);
-    }
-    
-    $match[0] = preg_replace('~<textarea([^\>]*>).*?</textarea>~', "<textarea$1</textarea>", $match[0]);   // have to keep the hidden textarea empty
-    $match[0] = preg_replace('~(class=[\'"][^\'"]*?)required([^\'"]*?[\'"])~', "$1$2", $match[0]);   // gotta get rid of class="required"
-    
-    $output = $match[0].'<!-- </form> -->'.$new.$css;
+    $output = $sForm.'<!-- </form> -->'.$sTextareaNew;
    
     return $output;
   }  
@@ -1375,7 +1774,7 @@ window.onload = function(e) { fvaq(); setTimeout('fvaq', 250); };
 
   	if( isset($_POST['m_'.$protect]) && isset($_POST['ma_'.$protect]) && $_POST['m_'.$protect] == $_POST['ma_'.$protect] ) {
     	$_POST['user_email'] = ( $_POST['user_email'] ) ? $_POST['user_email'] : $_POST[$this->func__ip_protect()];
-  	} else if( trim($_POST['user_email']) != "" ) {
+  	} else if( isset($_POST['user_email']) && trim($_POST['user_email']) != "" ) {
       $fv_antispam_registrations = get_option('fv_antispam_registrations');
       $fv_antispam_registrations = ( $fv_antispam_registrations ) ? $fv_antispam_registrations : array();      
       $fv_antispam_registrations[] = array( 'date' => date('r'), 'user_login' => $_POST['user_login'], 'user_email' => $_POST['user_email'] );
@@ -1383,7 +1782,7 @@ window.onload = function(e) { fvaq(); setTimeout('fvaq', 250); };
       unset($_POST['user_email']);
       
       add_filter( 'registration_errors', array( $this, 'func__registration_errors' ) );
-    } else {
+    } else if( isset($_POST[$this->func__ip_protect()]) ) {
     	$_POST['user_email'] = $_POST[$this->func__ip_protect()];                  
     }
   }
@@ -1426,6 +1825,10 @@ window.onload = function(e) { fvaq(); setTimeout('fvaq', 250); };
   
   
   function func__verify_comment_request($comment) { ///  detect spam here
+    
+    if( $this->util__is_jetpack_comments() ) {
+      return $comment;
+    }
 
     $request_url = @$_SERVER['REQUEST_URI'];
     $request_ip = @$_SERVER['REMOTE_ADDR'];
@@ -1494,7 +1897,40 @@ window.onload = function(e) { fvaq(); setTimeout('fvaq', 250); };
     if (current_user_can('manage_options') === false || !is_user_logged_in()) {
       wp_die('You do not have permission to access!');
     }
-  }  
+  }
+  
+  
+  
+  
+  function util__closed_meta_boxes( $closed ) {
+    if ( false === $closed ) {
+        $closed = array( 'fv_antispam_advanced', 'fv_antispam_filled_in' );
+    }
+    
+    return $closed;
+  }
+  
+  
+  
+  
+  function util__is_filled_in() {
+    if( stripos( implode(get_option('active_plugins')), 'filled-in' ) !== false ) {
+      return true;
+    }
+    return false;
+  }
+  
+  
+  
+  
+  function util__is_jetpack_comments() {
+    if( $aJetPack = get_option('jetpack_active_modules') ) {
+      if( in_array( 'comments', $aJetPack ) ) {
+        return true;
+      }    
+    }
+    return false;
+  }
     
     
     
@@ -1510,6 +1946,23 @@ window.onload = function(e) { fvaq(); setTimeout('fvaq', 250); };
     return strpos(TEMPLATEPATH, 'wptouch');
   }    
 
+  
+  
+  
+  function util__pointers_ajax() {
+
+    if( isset($_POST['key']) && $_POST['key'] == 'fv_antispam_notice_custom_questions' && isset($_POST['value']) ) {
+      check_ajax_referer('fv_antispam_notice_custom_questions');
+      $conf = get_option( 'fv_antispam' );
+
+      if( $conf && $_POST['value'] == 'true' ) {
+        $conf['notice_custom_questions'] = true;
+        update_option( 'fv_antispam', $conf );
+      }
+      die();
+    }
+
+  }
 
 
 
@@ -1665,6 +2118,3 @@ if ( !function_exists('wp_notify_moderator') && ( $GLOBALS['FV_Antispam']->func_
   endif;
 
 endif;
-
-
-?>

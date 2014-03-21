@@ -2,7 +2,7 @@
 Contributors: FolioVision
 Tags: antispam, spam, akismet
 Requires at least: 3.5
-Tested up to: 3.6
+Tested up to: 3.8.1
 Stable tag: trunk
 
 FV Antispam is a powerful and simple antispam plugin. It moves any spambot comments directly to trash and allows Akismet to just deal with human spam.
@@ -22,7 +22,7 @@ Our studies on our own sites have shown that for every 50 human spam comments a 
 * Reliable.
 * Zero false positives.
 * Virtually no CPU server load.
-* Works with the most powerful Wordpress form processor - [Filled In](http://wordpress.org/plugins/filled-in/).
+* Works with the most powerful Wordpress form processor - [Filled In](http://wordpress.org/plugins/filled-in/). Utilizes Akismet for it as well if installed. Allows you to enter custom questions for extra protection.
 
 = How does FV AntiSpam work so well? =
 
@@ -38,6 +38,13 @@ Our studies on our own sites have shown that for every 50 human spam comments a 
 [Support and more information](http://foliovision.com/seo-tools/wordpress/plugins/fv-antispam)
 
 == Changelog ==
+
+= 2.2 =
+
+* Filled in Antispam changed - uses hidden field + Akismet (install this plugin separately). If you still get spam, use customizable set of questions, see settings!
+* Fix for Jetpack Comments (Invalid token)
+* Fix for bad jQuery script on registration screen
+* Fix for Filled in forms in widget and excerpt texts.
 
 = 2.1 =
 
