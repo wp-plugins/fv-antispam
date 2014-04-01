@@ -4,12 +4,12 @@ Plugin Name: FV Antispam
 Plugin URI: http://foliovision.com/seo-tools/wordpress/plugins/fv-antispam
 Description: Powerful and simple antispam plugin. Puts all the spambot comments directly into trash and let's other plugins (Akismet) deal with the rest.
 Author: Foliovision
-Version: 2.2
+Version: 2.2.1
 Author URI: http://www.foliovision.com
 */
 
 
-$fv_antispam_ver = '2.2';
+$fv_antispam_ver = '2.2.1';
 $FV_Antispam_iFilledInCount = 0;
 $FV_Antispam_bMathJS = false;
 
@@ -112,9 +112,9 @@ class FV_Antispam extends FV_Antispam_Plugin {
       add_action( 'init', array( $this, 'func__precheck_comment_request' ), 0 );
       add_action( 'preprocess_comment', array( $this, 'func__verify_comment_request' ), 1 );
       
-      //add_action( 'preprocess_comment', array( $this, 'func__check_math' ), 1 );
+      //add_action( 'preprocess_comment', array( $this, 'func__check_math' ), 1 );        
       
-      if ($GLOBALS['pagenow'] == 'wp-login.php' && $this->func__get_plugin_option('spam_registrations')) {
+      if( $GLOBALS['pagenow'] == 'wp-login.php' && $this->func__get_plugin_option('spam_registrations') && !$this->func__check_s2member() ) {
 				add_action( 'login_head', array( $this, 'disp__login_form_js' ) );
 				add_action( 'login_enqueue_scripts', array( $this, 'func__login_scripts') );
         add_action( 'login_form', array( $this, 'disp__login_form_notice' ) );
@@ -695,8 +695,8 @@ class FV_Antispam extends FV_Antispam_Plugin {
           <tr>
             <td>
               <label for="spam_registrations">
-              <input type="checkbox" name="spam_registrations" id="spam_registrations" value="1" <?php checked($this->func__get_plugin_option('spam_registrations'), 1) ?> />
-              <?php _e('Protect the registration form', 'antispam_bee') ?>
+              <input <?php if( $this->func__check_s2member() ) : ?>onclick="return false"<?php endif; ?> type="checkbox" name="spam_registrations" id="spam_registrations" value="1" <?php checked($this->func__get_plugin_option('spam_registrations'), 1) ?> />
+              <?php _e('Protect the registration form', 'antispam_bee') ?> <?php if( $this->func__check_s2member() ) : ?>(<abbr title="Not available for s2Member!">?</abbr>)<?php endif; ?>
               </label>
             </td>
           </tr>        
@@ -1277,6 +1277,20 @@ function fvacq( form_name, form_id ) {
 		return $aComment;
 	}
 	
+  
+  
+  
+  function func__check_s2member() {
+    $bs2member = false;
+    $aPlugins = get_option('active_plugins');
+    foreach( $aPlugins AS $sPlugin ) {
+      if( stripos($sPlugin,'s2member.php') !== false ) {
+        $bs2member = true;
+      }
+    }
+    return $bs2member;
+  }
+  
 	
 	
 	

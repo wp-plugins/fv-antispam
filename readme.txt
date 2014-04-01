@@ -39,6 +39,11 @@ Our studies on our own sites have shown that for every 50 human spam comments a 
 
 == Changelog ==
 
+
+= 2.2.1 =
+
+* Fix for s2Member - no registration form protection for now
+
 = 2.2 =
 
 * Filled in Antispam changed - uses hidden field + Akismet (install this plugin separately). If you still get spam, use customizable set of questions, see settings!
