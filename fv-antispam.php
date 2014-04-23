@@ -4,12 +4,12 @@ Plugin Name: FV Antispam
 Plugin URI: http://foliovision.com/seo-tools/wordpress/plugins/fv-antispam
 Description: Powerful and simple antispam plugin. Puts all the spambot comments directly into trash and let's other plugins (Akismet) deal with the rest.
 Author: Foliovision
-Version: 2.2.1
+Version: 2.2.2
 Author URI: http://www.foliovision.com
 */
 
 
-$fv_antispam_ver = '2.2.1';
+$fv_antispam_ver = '2.2.2';
 $FV_Antispam_iFilledInCount = 0;
 $FV_Antispam_bMathJS = false;
 
@@ -141,9 +141,6 @@ class FV_Antispam extends FV_Antispam_Plugin {
       add_action( 'wp_head', array( $this, 'disp__head_css' ) );
       
     }
-    
-    remove_action( 'check_comment_flood', 'check_comment_flood_db', 10, 3 );
-    add_action( 'check_comment_flood', array( $this, 'func__check_comment_flood_db' ), 10, 3 );    
     
     add_action( 'fv_clean_trash_hourly', array( $this, 'cron__clean_comments_trash' ) );
     add_action( 'wp_insert_comment', array( $this, 'func__akismet_auto_check_update_meta' ), 11, 2 );   
@@ -1213,42 +1210,7 @@ function fvacq( form_name, form_id ) {
 	
 	
 	
-	/*
-	Copy of function check_comment_flood_db from wp-includes/comment.php, it skips comments which failed because of math question
-	*/
-	function func__check_comment_flood_db( $ip, $email, $date ) {
-		global $wpdb;
-		if ( current_user_can( 'manage_options' ) )
-			return; // don't throttle admins
-		$hour_ago = gmdate( 'Y-m-d H:i:s', time() - HOUR_IN_SECONDS );
-		if ( $lasttime = $wpdb->get_row( $wpdb->prepare( "SELECT `comment_ID`, `comment_date_gmt` FROM `$wpdb->comments` WHERE `comment_date_gmt` >= %s AND ( `comment_author_IP` = %s OR `comment_author_email` = %s ) ORDER BY `comment_date_gmt` DESC LIMIT 1", $hour_ago, $ip, $email ) ) ) {
-		
-			///file_put_contents('math.log', date('r')."\n".var_export($lasttime,true)."\n",FILE_APPEND );
-		
-			if( get_comment_meta( $lasttime->comment_ID, 'fv-antispam', true ) == 'Math question failed' ) {
-				///file_put_contents('math.log', date('r')."\nMight be flooding, but skipped because of math question\n",FILE_APPEND );
-				return;
-			}
-		
-			$time_lastcomment = mysql2date('U', $lasttime->comment_date_gmt, false);
-			$time_newcomment  = mysql2date('U', $date, false);
-			$flood_die = apply_filters('comment_flood_filter', false, $time_lastcomment, $time_newcomment);
-			if ( $flood_die ) {
-				do_action('comment_flood_trigger', $time_lastcomment, $time_newcomment);
-	
-				if ( defined('DOING_AJAX') )
-					die( __('You are posting comments too quickly. Slow down.') );
-	
-				wp_die( __('You are posting comments too quickly. Slow down.'), '', array('response' => 403) );
-			}
-		}
-	}
-	
-	
-	
-	
 	function func__check_math( $aComment ) {    
-    return $aComment; //  disable comment JS checking
     
 		if( is_user_logged_in() ) {
 			return $aComment;
@@ -1876,7 +1838,7 @@ function fvacq( form_name, form_id ) {
       if (!empty($_POST['bee_spam'])) { //  check the fake field
         return $this->func__flag_comment_request($comment);
       } else {
-      	$comment = $this->func__check_math( $comment );
+      	//$comment = $this->func__check_math( $comment );
       }
 
     } else if (!empty($comment_type) && in_array($comment_type, $ping_types) && $ping_allowed) {

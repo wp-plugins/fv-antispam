@@ -39,6 +39,9 @@ Our studies on our own sites have shown that for every 50 human spam comments a 
 
 == Changelog ==
 
+= 2.2.2 =
+
+* Bugfix - bad comment flood filter in use removed
 
 = 2.2.1 =
 
