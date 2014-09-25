@@ -39,6 +39,11 @@ Our studies on our own sites have shown that for every 50 human spam comments a 
 
 == Changelog ==
 
+= 2.2.3 =
+
+* Bugfix - custom question not affecting AJAX Filled in forms
+* Bugfix - fix for Immensely theme which uses JavaScript to validate the forms
+
 = 2.2.2 =
 
 * Bugfix - bad comment flood filter in use removed

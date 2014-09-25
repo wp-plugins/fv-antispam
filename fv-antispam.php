@@ -4,12 +4,12 @@ Plugin Name: FV Antispam
 Plugin URI: http://foliovision.com/seo-tools/wordpress/plugins/fv-antispam
 Description: Powerful and simple antispam plugin. Puts all the spambot comments directly into trash and let's other plugins (Akismet) deal with the rest.
 Author: Foliovision
-Version: 2.2.2
+Version: 2.2.3
 Author URI: http://www.foliovision.com
 */
 
 
-$fv_antispam_ver = '2.2.2';
+$fv_antispam_ver = '2.2.3';
 $FV_Antispam_iFilledInCount = 0;
 $FV_Antispam_bMathJS = false;
 
@@ -43,7 +43,7 @@ class FV_Antispam extends FV_Antispam_Plugin {
       if( !$options = get_option( 'fv_antispam' ) ) {
         $options = array();
       }
-      $options = array_merge($options, $this->aDefaultOptions );
+      $options = array_merge( $this->aDefaultOptions, $options );
       update_option( 'fv_antispam', $options );
       update_option( 'fv_antispam_ver', $fv_antispam_ver );
     }
@@ -1314,7 +1314,7 @@ function fvacq( form_name, form_id ) {
   	global $post;
   	$protect = FV_Antispam::func__protect($post->ID);
   	
-  	$bCustomQuestion = false;
+  	$bCustomQuestion = 0;
 		if( isset($_POST['ca_'.$protect]) && isset($_POST['c_'.$protect]) ) {	//	custom question		
 			if( $sQuestions = $this->func__get_plugin_option('questions') ) {
   			$aQuestions = explode( "\n", $sQuestions);  			
@@ -1326,15 +1326,22 @@ function fvacq( form_name, form_id ) {
         $sQuestion = $aQuestions[$iAnswer];
         list( $sAnswer, $sQuestion ) = explode( ",", strrev($sQuestion), 2 );
         $sAnswer = strrev($sAnswer);
-  
+
         $iLevenshtein = levenshtein( trim($sAnswer), trim($_POST['c_'.$protect]) );
         if( $iAnswer > count( $aQuestions ) ) {
-          $bCustomQuestion = false;  		  		
+          $bCustomQuestion = -1;  		  		
         } else if( $iLevenshtein >= 0 && $iLevenshtein <= floor(strlen(trim($sAnswer))/2) ) { //  ...so if there is 1 char answer, levenshtein will be merciless!
-          $bCustomQuestion = true;  //  this overrides any other check
+          $bCustomQuestion = 1;  //  this overrides any other check
+        } else {
+          $bCustomQuestion = -1;
         }
       }
   	}
+
+    if( $bCustomQuestion == -1 ) {
+      $this->func__set_filled_in_fail($iForm_id);
+      return;
+    }
     
     $bSkipJSCheck = false;  //  skip JS check on Ajax forms
     if( $iForm_id > 0 ) {
@@ -1348,7 +1355,7 @@ function fvacq( form_name, form_id ) {
 
     if(
     	isset( $_POST[$this->func__get_filled_in_fake_field_name()] ) && strlen( $_POST[$this->func__get_filled_in_fake_field_name()] )
-			&& ( isset($_POST['m_'.$protect]) && isset($_POST['ma_'.$protect]) && $_POST['m_'.$protect] != $_POST['ma_'.$protect] && !$bCustomQuestion )
+			&& ( isset($_POST['m_'.$protect]) && isset($_POST['ma_'.$protect]) && $_POST['m_'.$protect] != $_POST['ma_'.$protect] && $bCustomQuestion == 0 )
     ) {	//	fake field filled in, math question present and bad answer
 			setcookie( 'fvaq_nojs', 1, time()+120 );
       $this->func__set_filled_in_fail($iForm_id );      
@@ -1356,14 +1363,14 @@ function fvacq( form_name, form_id ) {
 			(
 				!isset($_POST['m_'.$protect]) ||
 				( isset($_POST['m_'.$protect]) && intval($_POST['m_'.$protect]) == 0 )
-			) && !isset($_POST['c_'.$protect]) && !$bCustomQuestion && !$bSkipJSCheck
+			) && !isset($_POST['c_'.$protect]) && $bCustomQuestion == 0 && !$bSkipJSCheck
 		) {	//	no math question and no custom question
 			setcookie( 'fvaq_nojs', 1, time()+120 ); 
 			$this->func__set_filled_in_fail($iForm_id);
-		} else if( !$bSkipJSCheck && !$bCustomQuestion && $_POST['m_'.$protect] != $_POST['ma_'.$protect] ) {	//	bad math answer	
+		} else if( !$bSkipJSCheck && $bCustomQuestion == 0 && $_POST['m_'.$protect] != $_POST['ma_'.$protect] ) {	//	bad math answer	
 			setcookie( 'fvaq_nojs', 1, time()+120 );  
 			$this->func__set_filled_in_fail($iForm_id);
-		} else if( !$bSkipJSCheck && !$bCustomQuestion && ( !isset($_POST['m_'.$protect]) || !isset($_POST['ma_'.$protect]) ) ) {	//	no custom question, but no math answer either!
+		} else if( !$bSkipJSCheck && $bCustomQuestion == 0 && ( !isset($_POST['m_'.$protect]) || !isset($_POST['ma_'.$protect]) ) ) {	//	no custom question, but no math answer either!
 			$this->func__set_filled_in_fail($iForm_id);
 		} else if( function_exists('akismet_http_post') ) {
 		
@@ -1674,7 +1681,9 @@ function fvacq( form_name, form_id ) {
     $sForm = preg_replace('~(class=[\'"][^\'"]*?)required([^\'"]*?[\'"])~', "$1$2", $sForm);   // gotta get rid of class="required"
     
     $output = $sForm.'<!-- </form> -->'.$sTextareaNew;
-   
+    
+    $output = preg_replace( '~onsubmit=[\'"]return checkForm\(this\);?[\'"]~i', '', $output );
+
     return $output;
   }  
   
