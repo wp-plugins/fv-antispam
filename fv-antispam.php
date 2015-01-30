@@ -4,12 +4,12 @@ Plugin Name: FV Antispam
 Plugin URI: http://foliovision.com/seo-tools/wordpress/plugins/fv-antispam
 Description: Powerful and simple antispam plugin. Puts all the spambot comments directly into trash and let's other plugins (Akismet) deal with the rest.
 Author: Foliovision
-Version: 2.2.3
+Version: 2.2.4
 Author URI: http://www.foliovision.com
 */
 
 
-$fv_antispam_ver = '2.2.3';
+$fv_antispam_ver = '2.2.4';
 $FV_Antispam_iFilledInCount = 0;
 $FV_Antispam_bMathJS = false;
 
@@ -81,6 +81,8 @@ class FV_Antispam extends FV_Antispam_Plugin {
       add_filter( 'get_comment_text', array( $this, 'admin__get_comment_text' ) );
       add_filter( 'the_comments', array( $this, 'util__cache_comment_meta' ) );
       
+      add_filter('plugin_action_links',array($this, 'fv_antispam_plugin_action_links'), 10, 2);
+      
 		  $this->readme_URL = 'http://plugins.trac.wordpress.org/browser/fv-antispam/trunk/readme.txt?format=txt';    
 		  if( !has_action( 'in_plugin_update_message-fv-antispam/fv-antispam.php' ) ) {
 	   		add_action( 'in_plugin_update_message-fv-antispam/fv-antispam.php', array( $this, 'plugin_update_message' ) );
@@ -151,7 +153,7 @@ class FV_Antispam extends FV_Antispam_Plugin {
   
   
   function admin__admin_menu() {
-    add_options_page( 'FV Antispam', 'FV Antispam', ($this->util__is_min_wp('2.8') ? 'manage_options' : 9), __FILE__, array( $this, 'admin__show_admin_menu' ) );
+    add_options_page( 'FV Antispam', 'FV Antispam', ($this->util__is_min_wp('2.8') ? 'manage_options' : 9), 'fv-antispam', array( $this, 'admin__show_admin_menu' ) );
   }  
   
   
@@ -288,6 +290,18 @@ class FV_Antispam extends FV_Antispam_Plugin {
   		$comment_text .= "\n\n<strong>FV Antispam - Math question failed</strong>";
   	}
   	return $comment_text;
+  }
+  
+  
+  
+  
+  function fv_antispam_plugin_action_links($links, $file) {
+  	$plugin_file = basename(__FILE__);
+  	if (basename($file) == $plugin_file) {
+      $settings_link =  '<a href="'.site_url('wp-admin/options-general.php?page=fv-antispam').'"> '.__('Settings', 'antispam_bee').'</a>';
+  		array_unshift($links, $settings_link);
+  	}
+  	return $links;
   }
   
   
@@ -1618,7 +1632,7 @@ function fvacq( form_name, form_id ) {
     ob_start(
       create_function(
       '$input',
-      'return preg_replace_callback("#wp-comments-post.php\".*?(<textarea.*?name=[\'\"]comment[\'\"].*?</textarea>)#s", "FV_Antispam::func__replace_textarea" , $input);'
+      'return preg_replace_callback("#wp-comments-post.php[^\"]*?\".*?(<textarea.*?name=[\'\"]comment[\'\"].*?</textarea>)#s", "FV_Antispam::func__replace_textarea" , $input);'
       )
     );
   }

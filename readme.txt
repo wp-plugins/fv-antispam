@@ -39,6 +39,10 @@ Our studies on our own sites have shown that for every 50 human spam comments a 
 
 == Changelog ==
 
+= 2.2.4 =
+
+* Fix - WPEngine changed the comment post URL, updating the plugin to handle this properly. Check your trash for non-spam comments!
+
 = 2.2.3 =
 
 * Bugfix - custom question not affecting AJAX Filled in forms
