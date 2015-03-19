@@ -4,12 +4,12 @@ Plugin Name: FV Antispam
 Plugin URI: http://foliovision.com/seo-tools/wordpress/plugins/fv-antispam
 Description: Powerful and simple antispam plugin. Puts all the spambot comments directly into trash and let's other plugins (Akismet) deal with the rest.
 Author: Foliovision
-Version: 2.2.4
+Version: 2.3
 Author URI: http://www.foliovision.com
 */
 
 
-$fv_antispam_ver = '2.2.4';
+$fv_antispam_ver = '2.3';
 $FV_Antispam_iFilledInCount = 0;
 $FV_Antispam_bMathJS = false;
 
@@ -317,13 +317,13 @@ class FV_Antispam extends FV_Antispam_Plugin {
   
   
   function admin__init() {
-		if( !isset($_GET['page']) || $_GET['page'] != "fv-antispam/fv-antispam.php" ) {
+    if( !isset($_GET['page']) || $_GET['page'] != "fv-antispam" ) {
       return;    
     }
     
-		wp_enqueue_script('common');
-		wp_enqueue_script('wp-lists');
-		wp_enqueue_script('postbox');			    
+    wp_enqueue_script('common');
+    wp_enqueue_script('wp-lists');
+    wp_enqueue_script('postbox');			    
     
     if ($this->util__is_min_wp('2.7')) {
       load_plugin_textdomain( 'antispam_bee', false, 'fv-antispam/lang' );
@@ -1594,9 +1594,10 @@ function fvacq( form_name, form_id ) {
       unset($_POST[$this->func__protect($_POST['comment_post_ID'])]);
     } else {
       $_POST['bee_spam'] = 1;
+	  add_filter( 'preprocess_comment', array($this, 'remove_akismet_hook' ),0);
     }
-  } 
-	
+  }
+  
 	
 	
 	
@@ -1799,11 +1800,13 @@ function fvacq( form_name, form_id ) {
     $spam_remove = true;//!$this->func__get_plugin_option('flag_spam');
     $commentdata = get_comment( $id );
     
+    $res = false;
+    $res2 = false;
     if( $this->func__get_plugin_option('trash_banned') ) {
       $res = wp_blacklist_check($commentdata->comment_author, $commentdata->comment_author_email, $commentdata->comment_author_url, $commentdata->comment_content, $commentdata->comment_author_IP, $commentdata->comment_agent);
     }
     if( $spam_remove ) {
-      $res2 = $_POST['bee_spam'];
+      $res2 = isset($_POST['bee_spam']) ? $_POST['bee_spam'] : false;
     }
       
     if ( $res || $res2 == 1 ) {
@@ -1873,6 +1876,14 @@ function fvacq( form_name, form_id ) {
     }
     return $comment;
   }  
+  
+  
+  
+  
+  function remove_akismet_hook($comment){
+		remove_action( 'preprocess_comment', array( 'Akismet', 'auto_check_comment' ), 1 );
+		return $comment;
+  }
   
   
   
