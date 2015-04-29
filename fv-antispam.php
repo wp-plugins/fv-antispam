@@ -4,12 +4,12 @@ Plugin Name: FV Antispam
 Plugin URI: http://foliovision.com/seo-tools/wordpress/plugins/fv-antispam
 Description: Powerful and simple antispam plugin. Puts all the spambot comments directly into trash and let's other plugins (Akismet) deal with the rest.
 Author: Foliovision
-Version: 2.3
+Version: 2.4
 Author URI: http://www.foliovision.com
 */
 
 
-$fv_antispam_ver = '2.3';
+$fv_antispam_ver = '2.4';
 $FV_Antispam_iFilledInCount = 0;
 $FV_Antispam_bMathJS = false;
 
@@ -1673,7 +1673,7 @@ function fvacq( form_name, form_id ) {
     $sName = $name[1];
 
     $sTextarea = preg_replace('~<textarea([^\>]*>).*?</textarea>~', "<textarea$1</textarea>", $sTextarea ); // have to keep the hidden textarea empty
-    
+        
     $sProtect = FV_Antispam::func__protect($post->ID);
     
     $sTextareaNew = preg_replace( '/id=[\'"]'.$sID.'[\'"]/i', 'id="'.$sProtect.'"', $sTextarea );
@@ -1691,6 +1691,8 @@ function fvacq( form_name, form_id ) {
       $FV_Antispam_iFilledInCount++;
 			$sTextareaNew .= FV_Antispam::disp__math_question($sProtect);
     }
+    
+    $sTextarea = str_replace( array('required="required"',"required='required'"), array('',''), $sTextarea ); // HTML5 form validation needs to be disabled
     
     $sForm = preg_replace('~<textarea([^\>]*name=[\'\"]comment[\'\"][^\>]*>).*?</textarea>~', $sTextarea, $sForm ); // put in the adjusted textarea
     $sForm = preg_replace('~(class=[\'"][^\'"]*?)required([^\'"]*?[\'"])~', "$1$2", $sForm);   // gotta get rid of class="required"
